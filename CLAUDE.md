@@ -57,6 +57,27 @@ See `spec.md` for complete technical specifications including:
 - EXTH metadata mapping
 - Implementation phases and priorities
 
+## Permission Rules
+
+### ファイル操作時の規約
+すべてのファイル操作（Read, Write, Edit, およびBashコマンドのrm, mv, cp, mkdir, touch, chmod）を行う際は、必ず `./` プレフィックスを付けてリポジトリ内の相対パスを指定すること。
+
+```bash
+# 正しい例
+Read: ./README.md
+Write: ./internal/epub/reader.go
+Edit: ./cmd/epub2azw3/main.go
+rm ./temp.txt
+mv ./old.go ./new.go
+mkdir -p ./internal/newpkg
+
+# 誤った例（許可されない）
+Read: /home/user/src/project/README.md
+rm README.md
+```
+
+この制約により、リポジトリ外のファイルへの誤操作を防止する。
+
 ## Development Workflow
 
 ### Issue Management

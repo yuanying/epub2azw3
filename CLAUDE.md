@@ -56,3 +56,30 @@ See `spec.md` for complete technical specifications including:
 - PalmDoc compression algorithm
 - EXTH metadata mapping
 - Implementation phases and priorities
+
+## Development Workflow
+
+### Issue Management
+
+実装計画の各フェーズの項目はGitHub Issueとして管理する。
+
+**Issue作成時のガイドライン:**
+- 具体的なソースコードは含めない
+- 実装に必要な情報を過不足なくドキュメントとして記載する
+  - 実装場所（ファイルパス）
+  - 要件・仕様
+  - データ構造の定義
+  - 注意点
+  - 参考セクション（spec.mdへの参照）
+  - 完了条件
+
+### Implementation Flow
+
+Issue番号が指定されたら、以下の手順で実装を行う:
+
+1. **Issueの確認**: 指定されたIssue番号の内容を `gh issue view <番号>` で確認
+2. **ブランチ作成**: `git checkout -b feature/<issue番号>-<簡潔な説明>`
+3. **TDDで実装**: テストを先に作成し、実装を進める
+4. **コミット**: 適切な粒度でコミット
+5. **PR作成**: `gh pr create` でプルリクエストを作成
+   - PRの説明にはIssueへの参照を含める（`Closes #<番号>`）

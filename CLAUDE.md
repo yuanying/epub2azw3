@@ -104,3 +104,28 @@ Issue番号が指定されたら、以下の手順で実装を行う:
 4. **コミット**: 適切な粒度でコミット
 5. **PR作成**: `gh pr create` でプルリクエストを作成
    - PRの説明にはIssueへの参照を含める（`Closes #<番号>`）
+
+### Manual Testing
+
+実装した機能を実際のデータで手動確認する場合、`cmd/test/` 配下にテストプログラムを作成する。
+
+**テストプログラムのガイドライン:**
+- ファイル名: `cmd/test/<機能名>/main.go`
+- コメントに関連するIssueとPRを記載
+- 使用方法をコメントに記述
+- 確認すべき項目を明示的に出力
+
+**例:**
+```go
+// Test program for EPUB ZIP reader functionality
+// Related: Issue #1, PR #10
+//
+// Usage:
+//   go run ./cmd/test/epub_reader/main.go <epub-file-path>
+```
+
+**実行例:**
+```bash
+# テストプログラムを実行
+go run ./cmd/test/epub_reader/main.go ~/Downloads/sample.epub
+```

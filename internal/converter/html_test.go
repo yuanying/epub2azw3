@@ -120,7 +120,7 @@ func TestHTMLBuilder_Build(t *testing.T) {
 
 // TestHTMLBuilder_ResolveLinks tests link resolution functionality
 func TestHTMLBuilder_ResolveLinks(t *testing.T) {
-	tests := []struct {
+		tests := []struct {
 		name     string
 		html     string
 		expected map[string]string // href -> expected transformed href
@@ -143,7 +143,7 @@ func TestHTMLBuilder_ResolveLinks(t *testing.T) {
 			name: "Fragment only link",
 			html: `<body><a href="#section1">Section 1</a></body>`,
 			expected: map[string]string{
-				"#section1": "#section1",
+				"#section1": "#ch01-section1",
 			},
 		},
 		{
@@ -158,6 +158,20 @@ func TestHTMLBuilder_ResolveLinks(t *testing.T) {
 			html: `<body><a href="https://example.com">External</a></body>`,
 			expected: map[string]string{
 				"https://example.com": "https://example.com",
+			},
+		},
+		{
+			name: "Internal link with fragment containing special characters",
+			html: `<body><a href="chapter02.xhtml#section&param">Section</a></body>`,
+			expected: map[string]string{
+				"chapter02.xhtml#section&param": "#ch02-section%26param",
+			},
+		},
+		{
+			name: "Internal link with fragment containing non-ASCII",
+			html: `<body><a href="chapter02.xhtml#第1節">Section</a></body>`,
+			expected: map[string]string{
+				"chapter02.xhtml#第1節": "#ch02-%E7%AC%AC1%E7%AF%80",
 			},
 		},
 	}
@@ -218,6 +232,70 @@ func TestHTMLBuilder_ResolveLinks(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+// TestHTMLBuilder_RewritesIDsAndFragments ensures IDs are namespaced and links point to the rewritten IDs
+func TestHTMLBuilder_RewritesIDsAndFragments(t *testing.T) {
+	ch1HTML := `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 1</title></head>
+<body>
+<h2 id="intro">Intro</h2>
+<p><a href="#intro">Back to intro</a></p>
+<p><a href="chapter02.xhtml#section1">Next section</a></p>
+</body>
+</html>`
+
+	ch2HTML := `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 2</title></head>
+<body>
+<h2 id="section1">Section 1</h2>
+</body>
+</html>`
+
+	content1, err := epub.LoadContent("ch1", "text/chapter01.xhtml", []byte(ch1HTML))
+	if err != nil {
+		t.Fatalf("Failed to load chapter 1: %v", err)
+	}
+	content2, err := epub.LoadContent("ch2", "text/chapter02.xhtml", []byte(ch2HTML))
+	if err != nil {
+		t.Fatalf("Failed to load chapter 2: %v", err)
+	}
+
+	builder := NewHTMLBuilder()
+	if err := builder.AddChapter(content1); err != nil {
+		t.Fatalf("Failed to add chapter 1: %v", err)
+	}
+	if err := builder.AddChapter(content2); err != nil {
+		t.Fatalf("Failed to add chapter 2: %v", err)
+	}
+
+	result, err := builder.Build()
+	if err != nil {
+		t.Fatalf("Failed to build HTML: %v", err)
+	}
+
+	doc, err := goquery.NewDocumentFromReader(strings.NewReader(result))
+	if err != nil {
+		t.Fatalf("Failed to parse integrated HTML: %v", err)
+	}
+
+	// IDs should be namespaced with chapter IDs
+	if doc.Find("#ch01-intro").Length() != 1 {
+		t.Fatalf("Expected namespaced intro ID #ch01-intro to exist")
+	}
+	if doc.Find("#ch02-section1").Length() != 1 {
+		t.Fatalf("Expected namespaced section ID #ch02-section1 to exist")
+	}
+
+	// Links should point at rewritten IDs
+	if doc.Find(`a[href="#ch01-intro"]`).Length() != 1 {
+		t.Errorf("Expected fragment-only link to rewrite to #ch01-intro")
+	}
+	if doc.Find(`a[href="#ch02-section1"]`).Length() != 1 {
+		t.Errorf("Expected cross-chapter link to rewrite to #ch02-section1")
 	}
 }
 

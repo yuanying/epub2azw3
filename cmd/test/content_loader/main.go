@@ -66,7 +66,7 @@ func main() {
 	fmt.Printf("Spine items: %d\n\n", len(opf.Spine))
 
 	// Load each spine item
-	fmt.Println("=== Loading Spine Items ===\n")
+	fmt.Println("=== Loading Spine Items ===")
 
 	successCount := 0
 	errorCount := 0

@@ -1,0 +1,327 @@
+package epub
+
+import (
+	"testing"
+)
+
+func TestParseOPF_EPUB20(t *testing.T) {
+	// EPUB 2.0 format OPF content
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>Sample Book Title</dc:title>
+    <dc:creator opf:role="aut">John Doe</dc:creator>
+    <dc:creator opf:role="edt">Jane Editor</dc:creator>
+    <dc:language>en</dc:language>
+    <dc:identifier id="bookid">urn:isbn:1234567890</dc:identifier>
+    <dc:publisher>Test Publisher</dc:publisher>
+    <dc:date>2024-01-01</dc:date>
+    <dc:description>This is a sample book description.</dc:description>
+    <dc:subject>Fiction</dc:subject>
+    <dc:subject>Adventure</dc:subject>
+    <dc:rights>Copyright 2024</dc:rights>
+    <meta name="cover" content="cover-image"/>
+  </metadata>
+  <manifest>
+    <item id="ncx" href="toc.ncx" media-type="application/x-dtbncx+xml"/>
+    <item id="cover-image" href="images/cover.jpg" media-type="image/jpeg"/>
+    <item id="chapter1" href="text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="chapter2" href="text/chapter2.xhtml" media-type="application/xhtml+xml"/>
+    <item id="stylesheet" href="css/style.css" media-type="text/css"/>
+  </manifest>
+  <spine toc="ncx">
+    <itemref idref="chapter1"/>
+    <itemref idref="chapter2" linear="no"/>
+  </spine>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "OEBPS/")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	// Test metadata
+	if opf.Metadata.Title != "Sample Book Title" {
+		t.Errorf("Title = %q, want %q", opf.Metadata.Title, "Sample Book Title")
+	}
+
+	if len(opf.Metadata.Creators) != 2 {
+		t.Fatalf("Creators count = %d, want 2", len(opf.Metadata.Creators))
+	}
+
+	if opf.Metadata.Creators[0].Name != "John Doe" {
+		t.Errorf("Creator[0].Name = %q, want %q", opf.Metadata.Creators[0].Name, "John Doe")
+	}
+
+	if opf.Metadata.Creators[0].Role != "aut" {
+		t.Errorf("Creator[0].Role = %q, want %q", opf.Metadata.Creators[0].Role, "aut")
+	}
+
+	if opf.Metadata.Creators[1].Name != "Jane Editor" {
+		t.Errorf("Creator[1].Name = %q, want %q", opf.Metadata.Creators[1].Name, "Jane Editor")
+	}
+
+	if opf.Metadata.Creators[1].Role != "edt" {
+		t.Errorf("Creator[1].Role = %q, want %q", opf.Metadata.Creators[1].Role, "edt")
+	}
+
+	if opf.Metadata.Language != "en" {
+		t.Errorf("Language = %q, want %q", opf.Metadata.Language, "en")
+	}
+
+	if opf.Metadata.Identifier != "urn:isbn:1234567890" {
+		t.Errorf("Identifier = %q, want %q", opf.Metadata.Identifier, "urn:isbn:1234567890")
+	}
+
+	if opf.Metadata.Publisher != "Test Publisher" {
+		t.Errorf("Publisher = %q, want %q", opf.Metadata.Publisher, "Test Publisher")
+	}
+
+	if opf.Metadata.Date != "2024-01-01" {
+		t.Errorf("Date = %q, want %q", opf.Metadata.Date, "2024-01-01")
+	}
+
+	if opf.Metadata.Description != "This is a sample book description." {
+		t.Errorf("Description = %q, want %q", opf.Metadata.Description, "This is a sample book description.")
+	}
+
+	if len(opf.Metadata.Subjects) != 2 {
+		t.Fatalf("Subjects count = %d, want 2", len(opf.Metadata.Subjects))
+	}
+
+	if opf.Metadata.Subjects[0] != "Fiction" {
+		t.Errorf("Subjects[0] = %q, want %q", opf.Metadata.Subjects[0], "Fiction")
+	}
+
+	if opf.Metadata.Subjects[1] != "Adventure" {
+		t.Errorf("Subjects[1] = %q, want %q", opf.Metadata.Subjects[1], "Adventure")
+	}
+
+	if opf.Metadata.Rights != "Copyright 2024" {
+		t.Errorf("Rights = %q, want %q", opf.Metadata.Rights, "Copyright 2024")
+	}
+
+	// Test manifest
+	if len(opf.Manifest) != 5 {
+		t.Fatalf("Manifest count = %d, want 5", len(opf.Manifest))
+	}
+
+	coverItem, ok := opf.Manifest["cover-image"]
+	if !ok {
+		t.Fatal("cover-image not found in manifest")
+	}
+
+	if coverItem.Href != "OEBPS/images/cover.jpg" {
+		t.Errorf("cover-image.Href = %q, want %q", coverItem.Href, "OEBPS/images/cover.jpg")
+	}
+
+	if coverItem.MediaType != "image/jpeg" {
+		t.Errorf("cover-image.MediaType = %q, want %q", coverItem.MediaType, "image/jpeg")
+	}
+
+	chapter1, ok := opf.Manifest["chapter1"]
+	if !ok {
+		t.Fatal("chapter1 not found in manifest")
+	}
+
+	if chapter1.Href != "OEBPS/text/chapter1.xhtml" {
+		t.Errorf("chapter1.Href = %q, want %q", chapter1.Href, "OEBPS/text/chapter1.xhtml")
+	}
+
+	// Test spine
+	if len(opf.Spine) != 2 {
+		t.Fatalf("Spine count = %d, want 2", len(opf.Spine))
+	}
+
+	if opf.Spine[0].IDRef != "chapter1" {
+		t.Errorf("Spine[0].IDRef = %q, want %q", opf.Spine[0].IDRef, "chapter1")
+	}
+
+	if !opf.Spine[0].Linear {
+		t.Errorf("Spine[0].Linear = false, want true")
+	}
+
+	if opf.Spine[1].IDRef != "chapter2" {
+		t.Errorf("Spine[1].IDRef = %q, want %q", opf.Spine[1].IDRef, "chapter2")
+	}
+
+	if opf.Spine[1].Linear {
+		t.Errorf("Spine[1].Linear = true, want false")
+	}
+
+	// Test NCX path
+	if opf.NCXPath != "OEBPS/toc.ncx" {
+		t.Errorf("NCXPath = %q, want %q", opf.NCXPath, "OEBPS/toc.ncx")
+	}
+}
+
+func TestParseOPF_EPUB30(t *testing.T) {
+	// EPUB 3.0 format OPF content with properties
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="bookid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>EPUB 3.0 Sample</dc:title>
+    <dc:creator id="creator01">Author Name</dc:creator>
+    <meta refines="#creator01" property="role" scheme="marc:relators">aut</meta>
+    <dc:language>ja</dc:language>
+    <dc:identifier id="bookid">urn:uuid:12345678-1234-1234-1234-123456789012</dc:identifier>
+    <meta property="dcterms:modified">2024-01-15T12:00:00Z</meta>
+  </metadata>
+  <manifest>
+    <item id="nav" href="nav.xhtml" media-type="application/xhtml+xml" properties="nav"/>
+    <item id="cover" href="images/cover.png" media-type="image/png" properties="cover-image"/>
+    <item id="ch1" href="text/ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "content/")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	// Test metadata
+	if opf.Metadata.Title != "EPUB 3.0 Sample" {
+		t.Errorf("Title = %q, want %q", opf.Metadata.Title, "EPUB 3.0 Sample")
+	}
+
+	if opf.Metadata.Language != "ja" {
+		t.Errorf("Language = %q, want %q", opf.Metadata.Language, "ja")
+	}
+
+	// Test manifest properties
+	navItem, ok := opf.Manifest["nav"]
+	if !ok {
+		t.Fatal("nav not found in manifest")
+	}
+
+	if len(navItem.Properties) != 1 || navItem.Properties[0] != "nav" {
+		t.Errorf("nav.Properties = %v, want [nav]", navItem.Properties)
+	}
+
+	coverItem, ok := opf.Manifest["cover"]
+	if !ok {
+		t.Fatal("cover not found in manifest")
+	}
+
+	if len(coverItem.Properties) != 1 || coverItem.Properties[0] != "cover-image" {
+		t.Errorf("cover.Properties = %v, want [cover-image]", coverItem.Properties)
+	}
+
+	if coverItem.Href != "content/images/cover.png" {
+		t.Errorf("cover.Href = %q, want %q", coverItem.Href, "content/images/cover.png")
+	}
+}
+
+func TestParseOPF_MinimalRequired(t *testing.T) {
+	// Minimal OPF with only required elements
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Minimal Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">minimal-001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	if opf.Metadata.Title != "Minimal Book" {
+		t.Errorf("Title = %q, want %q", opf.Metadata.Title, "Minimal Book")
+	}
+
+	if opf.Metadata.Language != "en" {
+		t.Errorf("Language = %q, want %q", opf.Metadata.Language, "en")
+	}
+
+	if opf.Metadata.Identifier != "minimal-001" {
+		t.Errorf("Identifier = %q, want %q", opf.Metadata.Identifier, "minimal-001")
+	}
+
+	if len(opf.Manifest) != 1 {
+		t.Errorf("Manifest count = %d, want 1", len(opf.Manifest))
+	}
+
+	if len(opf.Spine) != 1 {
+		t.Errorf("Spine count = %d, want 1", len(opf.Spine))
+	}
+}
+
+func TestFindCoverImage(t *testing.T) {
+	tests := []struct {
+		name     string
+		opf      *OPF
+		wantHref string
+		wantOK   bool
+	}{
+		{
+			name: "cover-image property in EPUB 3.0",
+			opf: &OPF{
+				Manifest: map[string]ManifestItem{
+					"cover": {
+						ID:         "cover",
+						Href:       "images/cover.jpg",
+						MediaType:  "image/jpeg",
+						Properties: []string{"cover-image"},
+					},
+				},
+			},
+			wantHref: "images/cover.jpg",
+			wantOK:   true,
+		},
+		{
+			name: "cover via meta name in EPUB 2.0",
+			opf: &OPF{
+				Metadata: Metadata{
+					CoverID: "cover-image",
+				},
+				Manifest: map[string]ManifestItem{
+					"cover-image": {
+						ID:        "cover-image",
+						Href:      "OEBPS/images/cover.jpg",
+						MediaType: "image/jpeg",
+					},
+				},
+			},
+			wantHref: "OEBPS/images/cover.jpg",
+			wantOK:   true,
+		},
+		{
+			name: "no cover image",
+			opf: &OPF{
+				Manifest: map[string]ManifestItem{
+					"chapter": {
+						ID:        "chapter",
+						Href:      "chapter.xhtml",
+						MediaType: "application/xhtml+xml",
+					},
+				},
+			},
+			wantHref: "",
+			wantOK:   false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			href, ok := tt.opf.FindCoverImage()
+			if ok != tt.wantOK {
+				t.Errorf("FindCoverImage() ok = %v, want %v", ok, tt.wantOK)
+			}
+			if href != tt.wantHref {
+				t.Errorf("FindCoverImage() href = %v, want %v", href, tt.wantHref)
+			}
+		})
+	}
+}

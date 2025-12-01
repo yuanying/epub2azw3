@@ -1,6 +1,7 @@
 package mobi
 
 import (
+	"bytes"
 	"encoding/binary"
 	"testing"
 	"time"
@@ -76,6 +77,54 @@ func TestPDBHeaderBytes(t *testing.T) {
 	}
 }
 
+func TestPDBHeaderBytes_MultibyteAndEmptyTitle(t *testing.T) {
+	tests := []struct {
+		name         string
+		title        string
+		wantTrimmed  string
+		wantLenBytes int
+	}{
+		{
+			name:         "empty title",
+			title:        "",
+			wantTrimmed:  "",
+			wantLenBytes: 0,
+		},
+		{
+			name:         "multibyte title truncated without cutting rune",
+			title:        "あいうえおかきくけこさ", // 11 chars, 33 bytes
+			wantTrimmed:  "あいうえおかきくけこ",  // 10 chars, 30 bytes
+			wantLenBytes: 30,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			pdb, err := NewPDB(tt.title, nil, time.Now(), time.Now())
+			if err != nil {
+				t.Fatalf("NewPDB returned error: %v", err)
+			}
+
+			headerBytes, err := pdb.HeaderBytes()
+			if err != nil {
+				t.Fatalf("HeaderBytes returned error: %v", err)
+			}
+
+			if len(headerBytes) != 78 {
+				t.Fatalf("header length = %d, want 78", len(headerBytes))
+			}
+
+			trimmed := bytes.TrimRight(headerBytes[:32], "\x00")
+			if string(trimmed) != tt.wantTrimmed {
+				t.Fatalf("trimmed title = %q, want %q", string(trimmed), tt.wantTrimmed)
+			}
+			if len(trimmed) != tt.wantLenBytes {
+				t.Fatalf("trimmed title length = %d, want %d", len(trimmed), tt.wantLenBytes)
+			}
+		})
+	}
+}
+
 func TestRecordListBytes(t *testing.T) {
 	recordSizes := []int{100, 200, 50}
 	creation := time.Date(2024, 5, 6, 7, 8, 9, 0, time.UTC)
@@ -123,5 +172,45 @@ func TestRecordListBytes(t *testing.T) {
 	padding := binary.BigEndian.Uint16(recordList[expectedLen-2:])
 	if padding != 0 {
 		t.Fatalf("padding = %d, want 0", padding)
+	}
+}
+
+func TestRecordListBytes_ZeroRecords(t *testing.T) {
+	pdb, err := NewPDB("Empty", nil, time.Now(), time.Now())
+	if err != nil {
+		t.Fatalf("NewPDB returned error: %v", err)
+	}
+
+	recordList, err := pdb.RecordListBytes()
+	if err != nil {
+		t.Fatalf("RecordListBytes returned error: %v", err)
+	}
+
+	if len(recordList) != 2 {
+		t.Fatalf("record list length = %d, want 2 (only padding)", len(recordList))
+	}
+
+	if got := binary.BigEndian.Uint16(recordList); got != 0 {
+		t.Fatalf("padding = %d, want 0", got)
+	}
+}
+
+func TestNewPDB_ZeroTimeDefaults(t *testing.T) {
+	start := time.Now().UTC()
+	pdb, err := NewPDB("Default Time", []int{1}, time.Time{}, time.Time{})
+	if err != nil {
+		t.Fatalf("NewPDB returned error: %v", err)
+	}
+	end := time.Now().UTC()
+
+	creationUnix := int64(pdb.Header.CreationDate) - PalmEpochOffset
+	modUnix := int64(pdb.Header.ModificationDate) - PalmEpochOffset
+
+	if modUnix != creationUnix {
+		t.Fatalf("modification date (%d) should match creation date (%d) when zero time provided", modUnix, creationUnix)
+	}
+
+	if creationUnix < start.Unix() || creationUnix > end.Unix() {
+		t.Fatalf("creation date %d not within expected range [%d, %d]", creationUnix, start.Unix(), end.Unix())
 	}
 }

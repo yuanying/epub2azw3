@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"time"
+	"unicode/utf8"
 )
 
 // PalmEpochOffset represents the difference in seconds between Unix epoch and Palm epoch.
@@ -171,11 +172,22 @@ func buildRecordEntries(recordSizes []int) []RecordEntry {
 // truncateDatabaseName truncates the database name to 31 bytes and NULL pads to 32 bytes.
 func truncateDatabaseName(name string) [32]byte {
 	var result [32]byte
-	nameBytes := []byte(name)
-	if len(nameBytes) > 31 {
-		nameBytes = nameBytes[:31]
+
+	var buf []byte
+	for i := 0; i < len(name); {
+		r, size := utf8.DecodeRuneInString(name[i:])
+		if r == utf8.RuneError && size == 1 {
+			// Treat invalid UTF-8 byte as-is to avoid silent drop
+			size = 1
+		}
+		if len(buf)+size > 31 {
+			break
+		}
+		buf = append(buf, name[i:i+size]...)
+		i += size
 	}
-	copy(result[:], nameBytes)
+
+	copy(result[:], buf)
 	return result
 }
 

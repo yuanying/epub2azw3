@@ -15,6 +15,7 @@ type Content struct {
 	Document  *goquery.Document // Parsed HTML document
 	CSSLinks  []string          // Referenced CSS file paths
 	ImageRefs []string          // Referenced image paths
+	BodyAttrs map[string]string // Attributes from body/html elements (class, dir, lang, xml:lang)
 }
 
 // LoadContent loads and parses an XHTML content file
@@ -34,6 +35,7 @@ func LoadContent(id, path string, content []byte) (*Content, error) {
 		Document:  doc,
 		CSSLinks:  []string{},
 		ImageRefs: []string{},
+		BodyAttrs: make(map[string]string),
 	}
 
 	// Get base directory for resolving relative paths
@@ -54,6 +56,24 @@ func LoadContent(id, path string, content []byte) (*Content, error) {
 			c.ImageRefs = append(c.ImageRefs, resolved)
 		}
 	})
+
+	// Extract body/html attributes (class, dir, lang, xml:lang)
+	targetAttrs := []string{"class", "dir", "lang", "xml:lang"}
+	body := doc.Find("body")
+	for _, attr := range targetAttrs {
+		if val, exists := body.Attr(attr); exists && val != "" {
+			c.BodyAttrs[attr] = val
+		}
+	}
+	// Fallback to html element for attributes not found on body
+	html := doc.Find("html")
+	for _, attr := range targetAttrs {
+		if _, alreadySet := c.BodyAttrs[attr]; !alreadySet {
+			if val, exists := html.Attr(attr); exists && val != "" {
+				c.BodyAttrs[attr] = val
+			}
+		}
+	}
 
 	return c, nil
 }

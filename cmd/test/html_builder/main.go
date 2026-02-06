@@ -88,6 +88,11 @@ func main() {
 	// Track statistics
 	totalChapters := 0
 	cssFiles := make(map[string]bool)
+	type cssRef struct {
+		chapterID string
+		path      string
+	}
+	orderedCSS := make([]cssRef, 0, 64)
 	totalLinks := 0
 
 	// Process each spine item
@@ -142,28 +147,43 @@ func main() {
 			builder.GetChapterID(manifestItem.Href),
 			len(content.CSSLinks),
 			linkCount)
+
+		chapterID := builder.GetChapterID(manifestItem.Href)
+		for _, cssPath := range content.CSSLinks {
+			orderedCSS = append(orderedCSS, cssRef{
+				chapterID: chapterID,
+				path:      cssPath,
+			})
+		}
 	}
 
 	fmt.Printf("\n✓ Loaded %d chapters\n\n", totalChapters)
 
 	// Load and add CSS files
-	if len(cssFiles) > 0 {
+	if len(orderedCSS) > 0 {
 		fmt.Println("=== Loading CSS Files ===")
 
-		for cssPath := range cssFiles {
-			fmt.Printf("Loading: %s\n", cssPath)
+		cssCache := make(map[string]string)
+		for _, ref := range orderedCSS {
+			cssPath := ref.path
+			fmt.Printf("Loading: %s (chapter %s)\n", cssPath, ref.chapterID)
 
-			cssData, err := reader.ReadFile(cssPath)
-			if err != nil {
-				log.Printf("  ✗ Failed to read CSS: %v", err)
-				continue
+			cssText, ok := cssCache[cssPath]
+			if !ok {
+				cssData, err := reader.ReadFile(cssPath)
+				if err != nil {
+					log.Printf("  ✗ Failed to read CSS: %v", err)
+					continue
+				}
+				cssText = string(cssData)
+				cssCache[cssPath] = cssText
 			}
 
-			builder.AddCSS(string(cssData))
-			fmt.Printf("  ✓ Added (%d bytes)\n", len(cssData))
+			builder.AddChapterCSS(ref.chapterID, cssText)
+			fmt.Printf("  ✓ Added (%d bytes)\n", len(cssText))
 		}
 
-		fmt.Printf("\n✓ Integrated %d CSS files\n\n", len(cssFiles))
+		fmt.Printf("\n✓ Integrated %d CSS references (%d unique files)\n\n", len(orderedCSS), len(cssCache))
 	}
 
 	// Build integrated HTML

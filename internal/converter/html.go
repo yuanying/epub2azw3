@@ -2,13 +2,19 @@ package converter
 
 import (
 	"fmt"
+	"log"
 	"net/url"
 	"path/filepath"
+	"regexp"
 	"strings"
 
 	"github.com/PuerkitoBio/goquery"
 	"github.com/yuanying/epub2azw3/internal/epub"
 )
+
+// cssIDSelectorRe matches CSS ID selectors (e.g., #cover, #intro)
+// Only matches identifiers starting with a letter or underscore
+var cssIDSelectorRe = regexp.MustCompile(`#([a-zA-Z_][a-zA-Z0-9_-]*)`)
 
 // HTMLBuilder builds a single integrated HTML document from multiple XHTML files
 type HTMLBuilder struct {
@@ -22,6 +28,7 @@ type ChapterContent struct {
 	ID           string            // Chapter ID (e.g., "ch01")
 	OriginalPath string            // Original file path in EPUB
 	Document     *goquery.Document // Parsed HTML document
+	BodyAttrs    map[string]string // Attributes inherited from body/html elements
 }
 
 // NewHTMLBuilder creates a new HTMLBuilder instance
@@ -42,20 +49,148 @@ func (h *HTMLBuilder) AddChapter(content *epub.Content) error {
 	// Store the mapping from file path to chapter ID
 	h.chapterIDs[content.Path] = chapterID
 
-	// Create chapter content
+	// Create chapter content with body/html attributes
+	bodyAttrs := make(map[string]string)
+	for k, v := range content.BodyAttrs {
+		bodyAttrs[k] = v
+	}
 	chapter := &ChapterContent{
 		ID:           chapterID,
 		OriginalPath: content.Path,
 		Document:     content.Document,
+		BodyAttrs:    bodyAttrs,
 	}
 
 	h.chapters = append(h.chapters, chapter)
 	return nil
 }
 
-// AddCSS adds CSS content to the builder
+// AddCSS adds global CSS content to the builder (no namespacing)
 func (h *HTMLBuilder) AddCSS(css string) {
 	h.cssContent = append(h.cssContent, css)
+}
+
+// AddChapterCSS adds chapter-specific CSS with ID selector namespacing
+// ID selectors like #cover are transformed to #chapterID-cover
+// Only selectors outside {} blocks are transformed (not color codes inside property values)
+func (h *HTMLBuilder) AddChapterCSS(chapterID, css string) {
+	namespaced := namespaceIDSelectors(chapterID, css)
+	h.cssContent = append(h.cssContent, namespaced)
+}
+
+// namespaceIDSelectors replaces ID selectors outside CSS {} blocks
+func namespaceIDSelectors(chapterID, css string) string {
+	var result strings.Builder
+	blockStack := make([]string, 0, 8) // "at-rule" or "decl"
+	inComment := false
+	inString := byte(0)
+	escapeNext := false
+	atStatementStart := true
+	inAtRulePrelude := false
+	i := 0
+	for i < len(css) {
+		ch := css[i]
+
+		if inComment {
+			if ch == '*' && i+1 < len(css) && css[i+1] == '/' {
+				inComment = false
+				result.WriteString("*/")
+				i += 2
+				continue
+			}
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if inString != 0 {
+			result.WriteByte(ch)
+			if escapeNext {
+				escapeNext = false
+			} else if ch == '\\' {
+				escapeNext = true
+			} else if ch == inString {
+				inString = 0
+			}
+			i++
+			continue
+		}
+
+		if ch == '/' && i+1 < len(css) && css[i+1] == '*' {
+			inComment = true
+			result.WriteString("/*")
+			i += 2
+			continue
+		}
+
+		if ch == '"' || ch == '\'' {
+			inString = ch
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if ch == '@' && atStatementStart {
+			inAtRulePrelude = true
+			atStatementStart = false
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if ch == '{' {
+			if inAtRulePrelude {
+				blockStack = append(blockStack, "at-rule")
+				inAtRulePrelude = false
+			} else {
+				blockStack = append(blockStack, "decl")
+			}
+			atStatementStart = true
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if ch == '}' {
+			if len(blockStack) > 0 {
+				blockStack = blockStack[:len(blockStack)-1]
+			}
+			atStatementStart = true
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if ch == ';' {
+			inAtRulePrelude = false
+			atStatementStart = true
+			result.WriteByte(ch)
+			i++
+			continue
+		}
+
+		if ch == '#' {
+			insideDecl := len(blockStack) > 0 && blockStack[len(blockStack)-1] == "decl"
+			if !insideDecl && !inAtRulePrelude {
+				// Try to match an ID selector at this position
+				loc := cssIDSelectorRe.FindStringIndex(css[i:])
+				if loc != nil && loc[0] == 0 {
+					match := cssIDSelectorRe.FindStringSubmatch(css[i:])
+					result.WriteString("#" + chapterID + "-" + match[1])
+					i += loc[1]
+					atStatementStart = false
+					continue
+				}
+			}
+		}
+
+		if !isCSSWhitespace(ch) {
+			atStatementStart = false
+		}
+		result.WriteByte(ch)
+		i++
+	}
+	return result.String()
 }
 
 // GetChapterID returns the chapter ID for a given file path
@@ -95,6 +230,10 @@ func (h *HTMLBuilder) Build() (string, error) {
 			if !exists || origID == "" {
 				return
 			}
+			// Preserve kobo.* IDs without namespacing (AozoraEpub3 compatibility)
+			if strings.HasPrefix(origID, "kobo.") {
+				return
+			}
 			sanitized := sanitizeFragmentForHTMLID(origID)
 			if sanitized == "" {
 				return
@@ -102,9 +241,16 @@ func (h *HTMLBuilder) Build() (string, error) {
 			s.SetAttr("id", chapter.ID+"-"+sanitized)
 		})
 
-		// Build the chapter div HTML
+		// Build the chapter div HTML with inherited body/html attributes
 		var chapterHTML strings.Builder
-		chapterHTML.WriteString(fmt.Sprintf(`<div id="%s">`, chapter.ID))
+		chapterHTML.WriteString(fmt.Sprintf(`<div id="%s"`, chapter.ID))
+		// Apply body/html attributes in a stable order
+		for _, attr := range []string{"class", "dir", "lang", "xml:lang"} {
+			if val, ok := chapter.BodyAttrs[attr]; ok {
+				chapterHTML.WriteString(fmt.Sprintf(` %s="%s"`, attr, val))
+			}
+		}
+		chapterHTML.WriteString(">")
 		chapterHTML.WriteString("<mbp:pagebreak/>")
 
 		// Copy all children from the chapter body to the chapter div
@@ -161,6 +307,14 @@ func (h *HTMLBuilder) resolveLinks(body *goquery.Selection) {
 
 		// If it's a fragment-only reference (e.g., #section1), keep it as-is
 		if u.Path == "" && u.Fragment != "" {
+			// Preserve #kobo.* fragments as-is (AozoraEpub3 compatibility)
+			if strings.HasPrefix(u.Fragment, "kobo.") {
+				if !hasID(body, u.Fragment) {
+					log.Printf("warning: kobo fragment not found: #%s", u.Fragment)
+				}
+				return
+			}
+
 			chapterID := h.findChapterIDForLink(s)
 			if chapterID == "" {
 				return
@@ -198,11 +352,18 @@ func (h *HTMLBuilder) resolveLinks(body *goquery.Selection) {
 				// Transform the link
 				newHref := "#" + chapterID
 				if u.Fragment != "" {
-					// If there's a fragment, append it with a separator
-					// Sanitize the fragment to ensure valid HTML ID references
-					sanitizedFragment := sanitizeFragmentForHTMLID(u.Fragment)
-					if sanitizedFragment != "" {
-						newHref = "#" + chapterID + "-" + sanitizedFragment
+					// Preserve #kobo.* fragments without sanitization (AozoraEpub3 compatibility)
+					if strings.HasPrefix(u.Fragment, "kobo.") {
+						newHref = "#" + u.Fragment
+						if !hasID(body, u.Fragment) {
+							log.Printf("warning: kobo fragment not found: #%s", u.Fragment)
+						}
+					} else {
+						// Sanitize the fragment to ensure valid HTML ID references
+						sanitizedFragment := sanitizeFragmentForHTMLID(u.Fragment)
+						if sanitizedFragment != "" {
+							newHref = "#" + chapterID + "-" + sanitizedFragment
+						}
 					}
 				}
 				s.SetAttr("href", newHref)
@@ -225,14 +386,26 @@ func sanitizeFragmentForHTMLID(fragment string) string {
 	return url.QueryEscape(fragment)
 }
 
-	// resolveRelativePath resolves a relative path from a link element
-	func (h *HTMLBuilder) resolveRelativePath(link *goquery.Selection, relativePath string) string {
-		// Find the chapter this link is in
-		chapterPath, _ := h.chapterPathForLink(link)
+func hasID(body *goquery.Selection, id string) bool {
+	if id == "" {
+		return false
+	}
+	safeID := strings.ReplaceAll(id, `"`, `\"`)
+	return body.Find(fmt.Sprintf(`[id="%s"]`, safeID)).Length() > 0
+}
 
-		if chapterPath == "" {
-			return relativePath
-		}
+func isCSSWhitespace(ch byte) bool {
+	return ch == ' ' || ch == '\n' || ch == '\r' || ch == '\t' || ch == '\f'
+}
+
+// resolveRelativePath resolves a relative path from a link element
+func (h *HTMLBuilder) resolveRelativePath(link *goquery.Selection, relativePath string) string {
+	// Find the chapter this link is in
+	chapterPath, _ := h.chapterPathForLink(link)
+
+	if chapterPath == "" {
+		return relativePath
+	}
 
 	// Resolve relative path against the chapter's directory
 	chapterDir := filepath.Dir(chapterPath)

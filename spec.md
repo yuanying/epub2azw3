@@ -31,6 +31,7 @@ EPUBフォーマットの電子書籍をAmazon Kindle互換のAZW3（KF8）フ�
 
 - **完全独立性**: 外部変換ツールに依存しない
 - **品質**: Kindle実機で正しく表示される高品質な出力
+- **実機互換**: Kindle Paperwhite 実機で開けるAZW3を最小到達点とする
 - **パフォーマンス**: 大容量EPUB（100MB+）も高速処理
 - **保守性**: 明確な設計と十分なテスト
 - **拡張性**: 将来の機能追加が容易
@@ -45,6 +46,7 @@ EPUBフォーマットの電子書籍をAmazon Kindle互換のAZW3（KF8）フ�
 - メタデータの変換
 - 目次（NCX）の生成
 - 埋め込みフォントのサポート
+- **AozoraEpub3 で生成された EPUB3 の変換互換性**
 
 **含まれない機能**:
 - DRM処理（入力・出力とも）
@@ -61,7 +63,7 @@ EPUBフォーマットの電子書籍をAmazon Kindle互換のAZW3（KF8）フ�
 - 並行処理によるパフォーマンス向上
 
 **AZW3を選択した理由**:
-- Amazonの現行標準（MOBI7は2023年に廃止）
+- Amazonの現行標準（AmazonのサービスがMOBI形式の受付を段階的に停止: 2023年12月にSend-to-KindleでのMOBI受付停止、2025年3月にKDPでのMOBIアップロード停止）
 - 2011年以降の全Kindleデバイス対応
 - 十分な技術ドキュメントとリバースエンジニアリング情報
 - HTML5/CSS3のサブセット対応
@@ -210,14 +212,21 @@ EPUB 3.0 追加メタデータ:
 **toc 属性**（EPUB 2.0）:
 - NCXファイルへの参照（マニフェストid）
 
+**page-progression-direction 属性**（EPUB 3.0）:
+- `rtl` の場合、**右開きとして扱う**（AozoraEpub3互換の前提）
+
 **実装要件**:
 - itemref の順序を保持（配列/スライス）
 - linear="no" のアイテムを識別
 - toc属性からNCXを特定
+- page-progression-direction は保持するが、**出力HTMLへ自動付与はしない**
+- 既存の縦書きスタイル（`writing-mode: vertical-rl` 等）を削除しない
+ - page-progression-direction はメタデータとして保持し、**EXTH等への追加は行わない**
 
 #### 3.2.4 NCX（Navigation Control file for XML）
 
 EPUB 2.0の目次ファイル。EPUB 3.0では任意だが、Kindle互換性のため重要。
+**本プロジェクト方針**: 目次はNCXを優先し、NCXが存在しない場合のみEPUB 3 navからNCX相当構造を生成する。
 
 **構造**:
 ```
@@ -247,6 +256,7 @@ EPUB 2.0の目次ファイル。EPUB 3.0では任意だが、Kindle互換性の�
 #### 3.2.5 EPUB 3.0 ナビゲーション文書
 
 EPUB 3.0で導入されたHTMLベースの目次。NCXの後継。
+**本プロジェクト方針**: navは補助的に使用し、NCXが無い場合のフォールバックとして扱う。
 
 **構造**（XHTMLの一部）:
 ```
@@ -301,6 +311,7 @@ EPUB 3.0で導入されたHTMLベースの目次。NCXの後継。
 - リンク: `a`（href属性）
 - 画像: `img`（src, alt属性）
 - ブレーク: `br, hr`
+- ルビ: `ruby, rt, rp`
 
 **EPUB 3.0 の拡張**:
 - HTML5要素: `article, section, aside, nav, header, footer, figure, figcaption`
@@ -377,6 +388,21 @@ EPUB 3.0で導入されたHTMLベースの目次。NCXの後継。
 - パスを正規化（重複スラッシュ、`.` の除去）
 - ZIPアーカイブ内のパス区切りは `/`（OSに依存しない）
 
+### 3.8 AozoraEpub3 互換要件（最低限）
+
+**前提**: `testdata/test.epub` の構造を最低互換ラインとして扱う（リポジトリ同梱のテストデータ）。
+
+**必須対応**:
+- EPUB 3.0 の OPF（`version="3.0"`）を受け入れる
+- `spine` の `page-progression-direction="rtl"` を読み取り、**縦書き系コンテンツとして扱う**
+- `nav.xhtml` と `toc.ncx` の両方がある場合は **NCX優先**、NCXが無い場合のみNAVから生成
+- XHTMLの `class="vrtl"` や `class="tcy"`, `class="upr"` を**削除・正規化しない**
+- `ruby`, `rt`, `rp` を保持し、正規化時に削除しない
+- AozoraEpub3由来のCSS（`writing-mode`, `text-orientation`, `text-combine-upright`, `text-emphasis-*` と各ベンダープレフィックス）を**禁止プロパティ扱いにしない**
+
+**CSS保存の注意**:
+- AozoraEpub3は複数CSSファイルを使用するため、**XHTML内の<link>順序を維持**して統合する
+
 ---
 
 ## 4. AZW3/MOBIフォーマット詳細仕様
@@ -452,7 +478,7 @@ MOBIヘッダーの前に配置:
 
 | オフセット | サイズ | 内容 | 値 |
 |---------|-------|-----|---|
-| 0 | 2 | 圧縮タイプ | 1=無圧縮, 2=PalmDoc, 17480=HUFF/CDIC |
+| 0 | 2 | 圧縮タイプ | 1=無圧縮, 2=PalmDoc（推奨）, 17480=HUFF/CDIC（本プロジェクトでは非対応） |
 | 2 | 2 | 未使用 | 0x0000 |
 | 4 | 4 | テキスト長 | 解凍後のテキストバイト数 |
 | 8 | 2 | テキストレコード数 | 圧縮テキストのレコード数 |
@@ -470,56 +496,101 @@ MOBIヘッダーの前に配置:
 
 識別子 "MOBI" (0x4D4F4249) で始まる可変長ヘッダー:
 
-**主要フィールド**（オフセットはMOBI識別子からの相対）:
+**全フィールド**（オフセットはMOBI識別子からの相対）:
 
 | オフセット | サイズ | 内容 | 説明 |
 |---------|-------|-----|------|
 | 0 | 4 | 識別子 | "MOBI" (0x4D4F4249) |
 | 4 | 4 | ヘッダー長 | このヘッダーのバイト数（通常232〜） |
-| 8 | 4 | MOBIタイプ | 2=Mobipocket Book, 3=PalmDoc Book |
+| 8 | 4 | MOBIタイプ | 2=Mobipocket Book, 3=PalmDoc Book, **248=KF8** |
 | 12 | 4 | テキストエンコーディング | 1252=CP1252, 65001=UTF-8（推奨） |
 | 16 | 4 | 一意ID | ランダム値 |
 | 20 | 4 | ファイルバージョン | 6（KF8対応は8） |
-| ... | ... | ... | ... |
+| 24 | 4 | Ortographic index | 0xFFFFFFFF（未使用） |
+| 28 | 4 | Inflection index | 0xFFFFFFFF（未使用） |
+| 32 | 4 | Index names | 0xFFFFFFFF（未使用） |
+| 36 | 4 | Index keys | 0xFFFFFFFF（未使用） |
+| 40 | 24 | Extra index 0-5 | 各4バイト、0xFFFFFFFF（未使用） |
+| 64 | 4 | 最初のNon-Bookインデックス | 0xFFFFFFFF（未使用） |
+| 68 | 4 | Full Name Offset | **必須** — MOBIヘッダー先頭（"MOBI"識別子）からのタイトル文字列開始位置 |
+| 72 | 4 | Full Name Length | **必須** — タイトルのUTF-8バイト長 |
+| 76 | 4 | Language コード | 書籍の言語（例: 日本語=0x0411、英語=0x0409） |
 | 80 | 4 | 最初の画像インデックス | 最初の画像レコードの番号 |
 | 84 | 4 | 最初のHUFFインデックス | HUFF/CDICの開始（未使用時は0xFFFFFFFF） |
 | 88 | 4 | HUFFレコード数 | HUFF/CDICのレコード数（未使用時は0） |
-| ... | ... | ... | ... |
-| 108 | 4 | EXTHフラグ | bit 6がセット（0x40）でEXTHあり |
-| ... | ... | ... | ... |
-| 192 | 2 | DRMオフセット | 通常 0xFFFF（DRM未使用） |
-| 194 | 2 | DRMカウント | 通常 0（DRM未使用） |
-| ... | ... | ... | ... |
+| 92 | 4 | 最初のHUFFテーブルインデックス | 0xFFFFFFFF（未使用） |
+| 96 | 4 | HUFFテーブルレコード数 | 0（未使用） |
+| 100 | 4 | EXTHフラグ | bit 6がセット（0x40）でEXTHあり |
+| 104 | 32 | 未使用 | 0で埋める |
+| 136 | 4 | DRMオフセット | 0xFFFFFFFF（DRM未使用） |
+| 140 | 4 | DRMカウント | 0（DRM未使用） |
+| 144 | 4 | DRMサイズ | 0（DRM未使用） |
+| 148 | 4 | DRMフラグ | 0（DRM未使用） |
+| 152 | 8 | 未使用 | 0で埋める |
+| 160 | 2 | 最初のコンテンツレコード | **必須** — 最初のテキストレコード番号（通常1） |
+| 162 | 2 | 最後のコンテンツレコード | **必須** — 最後のテキストレコード番号 |
+| 164 | 4 | 未使用 | 0x00000001 |
+| 168 | 4 | FCIS レコード番号 | **必須** — FCISレコードのレコード番号 |
+| 172 | 4 | FCIS レコード数 | 0x00000001 |
+| 176 | 4 | FLIS レコード番号 | **必須** — FLISレコードのレコード番号 |
+| 180 | 4 | FLIS レコード数 | 0x00000001 |
+| 184 | 8 | 未使用 | 0で埋める |
+| 192 | 4 | 未使用 | 0xFFFFFFFF |
+| 196 | 4 | 未使用 | 0x00000000 |
+| 200 | 4 | 未使用 | 0xFFFFFFFF |
+| 204 | 4 | 未使用 | 0xFFFFFFFF |
+| 208 | 4 | Extra record data flags | KF8で使用されるフラグ |
+| 212 | 4 | INDXレコードオフセット | INDXレコードの番号（未使用時は0xFFFFFFFF） |
 
-**KF8（MOBI8）追加フィールド**（オフセット200以降）:
+**KF8（MOBI8）追加フィールド**（ヘッダー長が248以上の場合）:
 
-| オフセット | サイズ | 内容 |
-|---------|-------|-----|
-| 208 | 4 | FDST開始 | FDSTレコードのオフセット |
-| 212 | 4 | FDSTレコード数 | FDSTレコードの数 |
-| ... | ... | ... |
-| 242 | 4 | KF8境界 | KF8セクション開始のレコード番号 |
-| ... | ... | ... |
+| オフセット | サイズ | 内容 | 説明 |
+|---------|-------|-----|------|
+| 216 | 4 | 未使用 | 0xFFFFFFFF |
+| 220 | 4 | 未使用 | 0xFFFFFFFF |
+| 224 | 4 | 未使用 | 0xFFFFFFFF |
+| 228 | 4 | 未使用 | 0xFFFFFFFF |
+| 232 | 4 | 未使用 | 0xFFFFFFFF |
+| 236 | 4 | FDST flow count | FDSTフローの数 |
+| 240 | 4 | FDST開始オフセット | FDSTレコードのオフセット |
+| 244 | 4 | 未使用 | 0 |
 
 **実装要件**:
 - ヘッダー長: 最低232バイト、KF8対応は248バイト以上
+- MOBIタイプ: KF8-onlyの場合は **248** を設定
 - テキストエンコーディング: UTF-8 (65001) を使用
 - 一意ID: 乱数生成器で生成
 - ファイルバージョン: KF8対応なら 8
-- EXTHフラグ: 0x50 (bit 6とbit 4をセット)
-- 未使用フィールドは0でパディング
+- EXTHフラグ: 0x40（bit 6をセット）でEXTHレコードが存在することを示す
+- Full Name Offset / Length: **MOBIヘッダー先頭からの相対オフセット**とサイズを設定
+- 最初/最後のコンテンツレコード: テキストレコード範囲を正確に指定
+- FLIS/FCISレコード番号: 対応するレコードの番号を正確に指定
+- 未使用フィールドは0またはFFFFFFFFでパディング（フィールドによる）
 
 #### 4.3.3 完全タイトル（Full Name）
 
-MOBIヘッダーの直後、EXTHの前に配置:
+EXTHレコードの後に配置（MOBIヘッダーの直後ではない）:
 
 - 可変長のUTF-8文字列
-- 長さはMOBIヘッダーのフィールドで指定（オフセット84）
+- MOBIヘッダーの Full Name Offset（オフセット68-71）で**MOBIヘッダー先頭からの相対位置**を指定
+- MOBIヘッダーの Full Name Length（オフセット88-91）でバイト長を指定
 - 書籍のフルタイトルを格納
+- 末尾は4バイト境界にパディング
+
+**Record 0 の内部レイアウト**:
+```
+Record 0:
+  [0..15]      PalmDOCヘッダー (16 bytes)
+  [16..N]      MOBIヘッダー ("MOBI"から始まる可変長)
+  [N+1..M]     EXTHレコード ("EXTH"から始まる、4バイトアライメント含む)
+  [M+1..M+L]   Full Name (可変長UTF-8文字列)
+  [M+L+1..]    パディング（4バイト境界）
+```
 
 **実装要件**:
 - タイトルのUTF-8バイト列
-- 長さを正確にMOBIヘッダーに記録
+- Full Name Offset と Full Name Length を正確にMOBIヘッダーに記録（基準はMOBIヘッダー先頭）
+- EXTHレコード書き込み後にFull Nameを配置
 
 ### 4.4 EXTHレコード（拡張メタデータ）
 
@@ -562,7 +633,8 @@ EXTHヘッダー（12バイト）
 - 各メタデータフィールドをEXTHレコードに変換
 - レコード長: 8 + データバイト数
 - 全体をパディング（4バイト境界に合わせる）
-- KF8対応の場合、タイプ121と125を必ず含める
+- **Kindle Paperwhite実機互換のため、KF8-onlyでもタイプ121と125を必ず含める**
+- タイプ121（KF8境界）は**実際のレコード配置と整合する値**を設定する（MOBI7を含まない場合も省略しない）
 
 ### 4.5 テキストレコード（HTML コンテンツ）
 
@@ -579,20 +651,21 @@ EXTHヘッダー（12バイト）
 2. **リテラルバイト** (0x09-0x7F):
    - そのまま出力
 
-3. **スペース + リテラル** (0x80-0xBF):
-   - 0x80を引いた値がリテラル文字
-   - スペース (0x20) + リテラル文字 を出力
-
-4. **後方参照** (0xC0-0xFF):
+3. **後方参照** (0x80-0xBF):
    - 2バイトシーケンス: `[高位バイト][低位バイト]`
-   - 距離: `((高位バイト & 0x3F) << 8) | 低位バイト` の下位13ビット
-   - 長さ: `(((高位バイト >> 6) & 0x03) + 3)`
+   - 距離: `((高位バイト & 0x3F) << 8) | 低位バイト` の上位11ビット
+   - 長さ: 下位3ビット + 3
    - 過去のバッファから「距離」だけ戻った位置から「長さ」バイトをコピー
 
+4. **スペース + リテラル** (0xC0-0xFF):
+   - バイト値 XOR 0x80 した値がリテラル文字
+   - スペース (0x20) + リテラル文字 を出力
+
 **実装要件**:
-- 各テキストレコードは最大4096バイト（圧縮後）
+- 入力テキストを4096バイトのブロックに分割してから圧縮する（4096バイトは**圧縮前**の最大サイズ）
 - HTML文字列を連結してバイト列化
-- PalmDoc圧縮を適用
+- 4096バイトごとに分割
+- 各ブロックにPalmDoc圧縮を適用（圧縮後のサイズは4096バイトより小さくなる）
 - レコードリストに追加
 
 #### 4.5.2 HTML構造化
@@ -635,6 +708,7 @@ Kindleに送るHTMLは以下の形式:
 - `<mbp:pagebreak/>` を章の前後に挿入
 - 相対リンクを同一文書内のアンカーに変換
 - CSSはインラインスタイルまたは `<style>` タグ内に埋め込み
+- **HTML目次はNCXから生成**（AozoraEpub3の`nav.xhtml`はデザイン用として扱い、本文統合には直接埋め込まない）
 
 ### 4.6 画像レコード
 
@@ -655,6 +729,7 @@ Kindleに送るHTMLは以下の形式:
 
 - `kindle:embed:XXXX`: レコード番号（4桁の16進数）
 - 最初の画像レコード番号はMOBIヘッダーで指定
+- **注意**: calibreではbase-32エンコーディングを使用している。本仕様では4桁16進数を採用するが、**Kindle Paperwhite実機**での検証が必要
 
 ### 4.7 NCX（MOBI形式での目次）
 
@@ -679,12 +754,12 @@ HTML形式の目次を生成:
 ```
 
 **filepos の計算**:
-- HTMLテキストのバイトオフセット
-- 圧縮前の位置を指定
-- 各章の開始タグの位置を記録
+- **テキストレコード生成に用いる「圧縮前の連結HTMLバイト列」**の先頭からのバイトオフセット
+- 圧縮・レコード分割前に計算し、圧縮後の位置に合わせない
+- 章ID/フラグメントの開始タグ位置を**同一の連結HTMLバイト列**から算出
 
 **実装要件**:
-- EPUBのNCXまたはナビゲーション文書を変換
+- **優先順位**: NCXを優先し、NCXが無い場合のみEPUB 3 navから生成
 - 各エントリに filepos を計算して付与
 - 階層構造を `<ul><li>` のネストで表現
 - NCXレコードをテキストレコードの後ろに配置
@@ -716,9 +791,77 @@ KF8で使用される、テキストの論理的な流れを定義する構造�
 **実装要件**:
 - 各章の開始位置（バイトオフセット）を記録
 - MOBIヘッダーでFDSTレコードの位置と数を指定
-- KF8セクションでは必須
+- **Kindle Paperwhite実機互換のため、KF8-onlyでも必須**
 
-### 4.10 KF8デュアルフォーマット構造
+### 4.10 FLIS / FCIS / End-of-file レコード
+
+Kindleリーダーが正しくファイルを認識するために必要な固定レコード群。calibreおよびKindleGenは必ずこれらを生成する。
+
+#### 4.10.1 FLIS（Fixed Layout Information Structure）レコード
+
+固定36バイトのレコード。内容は固定値。
+
+**バイトレイアウト**:
+
+| オフセット | サイズ | 値 | 説明 |
+|-----------|-------|-----|------|
+| 0 | 4 | "FLIS" (0x464C4953) | 識別子 |
+| 4 | 4 | 0x00000008 | 固定 |
+| 8 | 2 | 0x0041 | 固定 |
+| 10 | 2 | 0x0000 | 固定 |
+| 12 | 4 | 0x00000000 | 固定 |
+| 16 | 4 | 0xFFFFFFFF | 固定 |
+| 20 | 2 | 0x0001 | 固定 |
+| 22 | 2 | 0x0003 | 固定 |
+| 24 | 4 | 0x00000003 | 固定 |
+| 28 | 4 | 0x00000001 | 固定 |
+| 32 | 4 | 0xFFFFFFFF | 固定 |
+
+#### 4.10.2 FCIS（File Compressed Information Structure）レコード
+
+44バイトのレコード。テキスト長のみ可変、残りは固定値。
+
+**バイトレイアウト**:
+
+| オフセット | サイズ | 値 | 説明 |
+|-----------|-------|-----|------|
+| 0 | 4 | "FCIS" (0x46434953) | 識別子 |
+| 4 | 4 | 0x00000014 | 固定 |
+| 8 | 4 | 0x00000010 | 固定 |
+| 12 | 4 | 0x00000001 | 固定 |
+| 16 | 4 | 0x00000000 | 固定 |
+| 20 | 4 | (テキスト長) | 解凍後の全テキストバイト数（PalmDOCヘッダーのテキスト長と一致） |
+| 24 | 4 | 0x00000000 | 固定 |
+| 28 | 4 | 0x00000020 | 固定 |
+| 32 | 4 | 0x00000008 | 固定 |
+| 36 | 2 | 0x0001 | 固定 |
+| 38 | 2 | 0x0001 | 固定 |
+| 40 | 4 | 0x00000000 | 固定 |
+
+#### 4.10.3 End-of-file レコード
+
+固定4バイトのレコード。ファイルの終端を示すマーカー。
+
+**値**: `0xE98E0D0A`
+
+**レコード配置順序**:
+```
+レコード0:     MOBIヘッダー + EXTHレコード + Full Name
+レコード1〜N:  圧縮テキスト
+レコードN+1〜M: 画像データ
+FLISレコード
+FCISレコード
+End-of-fileレコード (EOF)
+```
+
+**実装要件**:
+- FLIS/FCISレコードの位置はMOBIヘッダーのフィールド（FLIS record number、FCIS record number）で指定する
+- End-of-fileレコードは必ず最後のレコードとして配置
+- FCISのテキスト長はPalmDOCヘッダーのテキスト長と一致させる
+
+### 4.11 KF8デュアルフォーマット構造
+
+> **注意**: 本プロジェクトではKF8-onlyを採用する。以下はDual Formatの技術的背景として参考情報として記載する。KF8-only形式ではMOBI7セクションは不要であり、実装する必要はない。
 
 **レイアウト**:
 ```
@@ -822,7 +965,7 @@ epub2azw3/
     - 相対リンクの解決
     ↓
 [Stage 4] CSS最適化
-    - 非対応プロパティの削除
+    - 非対応プロパティの削除（**AozoraEpub3必須プロパティは除外**）
     - 単位変換 (px → em)
     - インライン化
     ↓
@@ -896,47 +1039,29 @@ epub2azw3/
 - ファイル書き込み（競合回避）
 
 **実装パターン**:
-```
-// 疑似コード
-func (c *Converter) OptimizeImages() error {
-    imagesChan := make(chan *Image)
-    resultsChan := make(chan *OptimizedImage)
-    errChan := make(chan error)
-    
-    // ワーカー起動
-    workers := runtime.NumCPU()
-    for i := 0; i < workers; i++ {
-        go imageWorker(imagesChan, resultsChan, errChan)
-    }
-    
-    // 画像を送信
-    go func() {
-        for _, img := range c.images {
-            imagesChan <- img
-        }
-        close(imagesChan)
-    }()
-    
-    // 結果を収集
-    // ...
-}
-```
+- ワーカープールパターンを使用
+- CPU数に応じたgoroutineを起動
+- チャネルで画像を分配し、結果を収集
 
 ### 5.5 メモリ管理戦略
 
 **大容量EPUB対応**:
 
-1. **ストリーミング処理**:
-   - 全ファイルをメモリに展開せず、必要に応じて読み込み
-   - ZIPリーダーのストリーミングAPI使用
+AZW3フォーマットの特性上、全HTMLを単一文書に結合する必要があるため、テキストの完全なストリーミング処理は不可能。テキストはDOMとしてメモリ展開し、画像のみストリーミング処理するハイブリッドアプローチを採用する。
 
-2. **チャンク処理**:
-   - HTMLコンテンツを4096バイトのチャンクに分割して圧縮
+1. **テキスト処理（メモリ展開）**:
+   - HTML/CSSはgoqueryによるDOM展開で処理
+   - 統合後のHTML文字列を4096バイトのチャンクに分割して圧縮
    - レコード単位で処理
 
-3. **一時ファイルの活用**:
+2. **画像処理（ストリーミング）**:
+   - 画像は一括展開せず、必要に応じてZIPから読み込み
    - 大きな画像は一時ディレクトリに書き出し
    - 最終的に順次読み込んでレコード化
+
+3. **ZIPアーカイブ**:
+   - ZIPリーダーのランダムアクセスAPIを使用
+   - 必要なファイルのみ読み込み
 
 **メモリプロファイリング**:
 - `runtime/pprof` を使用
@@ -1026,6 +1151,15 @@ figure → div class="figure"
 figcaption → p class="figcaption"
 ```
 
+**AozoraEpub3互換の注意**:
+- `ruby`, `rt`, `rp` は変換・削除しない
+- `span` に付与された `class="tcy"` や `class="upr"` を削除しない
+- `ruby` の本文文字列は保持し、`rt` は**削除せず**そのまま残す（PaperwhiteのKF8表示に委ねる）
+
+**Paperwhite表示の許容範囲**:
+- `ruby` のルビが読めない/位置がずれる場合があるが、本文が読めることを優先する
+- `tcy` が横中横として表示されない場合でも、本文が読めることを許容する
+
 **削除する属性**:
 - `contenteditable`
 - `draggable`
@@ -1033,6 +1167,13 @@ figcaption → p class="figcaption"
 - `spellcheck`
 - `translate`
 - `data-*` (全て)
+
+**保持する属性（AozoraEpub3互換）**:
+- `class`
+- `id`
+- `lang`
+- `xml:lang`
+- `dir`
 
 **変換アルゴリズム**:
 1. goquery でHTMLをロード
@@ -1049,6 +1190,18 @@ figcaption → p class="figcaption"
 - `transition: *`
 - `animation: *`
 - 負のマージン: `margin: -10px` など
+
+**AozoraEpub3互換で必ず保持するプロパティ**（禁止プロパティの対象外）:
+- `writing-mode`, `-epub-writing-mode`, `-webkit-writing-mode`
+- `text-orientation`, `-epub-text-orientation`, `-webkit-text-orientation`
+- `text-combine-upright`, `-epub-text-combine`, `-webkit-text-combine`
+- `text-emphasis-style`, `text-emphasis-position`
+- `-epub-text-emphasis-style`, `-epub-text-emphasis-position`
+- `-webkit-text-emphasis-style`, `-webkit-text-emphasis-position`
+- `ruby-position`
+
+**運用方針**:
+- `position`/`transform`/`animation` の削除は維持し、**縦書き系プロパティのみ例外**として保持する
 
 **単位変換**:
 - `px` → `em` (1em = 16px として計算)
@@ -1067,7 +1220,21 @@ figcaption → p class="figcaption"
 - 大きいCSS: 各HTML要素に `style` 属性として分散
 - Kindleは外部CSSをサポートするが、インライン化が安全
 
-#### 6.2.3 リンク処理
+#### 6.2.3 CSS名前空間化
+
+**問題**: HTML統合時に各チャプターのIDにプレフィックス（`ch01-`等）を付加するが、CSS内のIDセレクタはこの変更に追随しない。
+
+**例**:
+- HTML内 `id="cover"` → 統合後 `id="ch01-cover"` に変換
+- CSS内 `#cover { width: 100%; }` → マッチしなくなる
+
+**対応策**:
+- CSS内のIDセレクタも同様にプレフィックスを付加する
+- 例: `#cover` → `#ch01-cover`
+- 正規表現で `#` で始まるセレクタを検出し、対応する章のプレフィックスを付加
+- クラスセレクタ（`.classname`）は複数章で共有されるため変換不要
+
+#### 6.2.4 リンク処理
 
 **相対リンクの変換**:
 - `href="chapter02.xhtml"` → `href="#ch02"` (同一文書内アンカー)
@@ -1118,7 +1285,7 @@ figcaption → p class="figcaption"
 #### 6.4.1 NCX → MOBI NCX 変換
 
 **アルゴリズム**:
-1. EPUBのNCX/NAVを解析済みのデータ構造から読み込み
+1. EPUBのNCXを解析済みのデータ構造から読み込み（NCXが無い場合のみNAVを使用）
 2. 各エントリに対してfileposを計算:
    - HTMLファイルのバイトオフセットを記録
    - フラグメント識別子（`#section1`）を考慮
@@ -1132,9 +1299,23 @@ figcaption → p class="figcaption"
    ```
 4. ネストされた項目は `<ul>` の入れ子で表現
 
+**NAV補助条件**:
+- NCXが存在しない場合のみNAVを使用
+- NAVを使用する場合、`epub:type="toc"` のみを対象とする
+
+#### 6.4.2 HTML目次（本文内）
+
+**方針**:
+- AozoraEpub3互換のため、**NCXからHTML目次を生成**して本文内に配置する
+- `nav.xhtml` はデザイン用の可能性が高いため、そのまま埋め込まない
+
+**生成ルール**:
+- タイトルは `ncx.docTitle` を使用
+- `<a href="#...">` のアンカーはリンク解決後の章IDを使用
+
 **filepos 計算の詳細**:
-- 圧縮前のHTMLバイト位置
-- 各章のHTMLを順次連結したものの累積オフセット
+- **圧縮前の連結HTMLバイト列**の位置を使用
+- 各章のHTMLを**テキストレコード生成と同一の順序・内容**で連結した累積オフセット
 - `id` 属性の位置を正確に記録するため、HTMLをバイト単位で走査
 
 #### 6.4.2 ナビゲーションポイント
@@ -1208,10 +1389,10 @@ figcaption → p class="figcaption"
 **詳細なロジック**:
 
 - **バイトごとに判定**:
-  1. スペース (0x20) の後に文字が続く場合:
-     - 1バイト (0x80 + 文字コード) に圧縮
-  2. 過去2047バイト以内に3バイト以上の一致がある場合:
-     - 2バイトの後方参照 (0xC0-0xFF)
+  1. 過去2047バイト以内に3バイト以上の一致がある場合:
+     - 2バイトの後方参照 (0x80-0xBF)
+  2. スペース (0x20) の後に印字可能文字が続く場合:
+     - 1バイト (0xC0 + 文字コード) に圧縮（文字コード XOR 0x80）
   3. それ以外:
      - リテラルバイト (0x09-0x7F) または非圧縮マーカー (0x01-0x08)
 
@@ -1239,8 +1420,8 @@ figcaption → p class="figcaption"
 2. レコード0を構築:
    - PalmDOCヘッダー
    - MOBIヘッダー
-   - 完全タイトル
    - EXTHレコード
+   - 完全タイトル（Full Name）
 3. テキストレコードを追加（レコード1〜N）
 4. 画像レコードを追加（レコードN+1〜M）
 5. NCXレコードを追加
@@ -1271,23 +1452,7 @@ figcaption → p class="figcaption"
 
 #### 6.7.3 バイナリ書き込み
 
-**`encoding/binary` を使用**:
-
-```
-import "encoding/binary"
-
-// 4バイト整数をビッグエンディアンで書き込み
-binary.Write(writer, binary.BigEndian, uint32(value))
-
-// 2バイト整数
-binary.Write(writer, binary.BigEndian, uint16(value))
-
-// バイト配列
-writer.Write([]byte("MOBI"))
-
-// ゼロ埋め
-writer.Write(make([]byte, paddingSize))
-```
+**`encoding/binary` パッケージを使用してビッグエンディアンで書き込む。**
 
 **注意点**:
 - MOBIは**ビッグエンディアン**（ネットワークバイトオーダー）
@@ -1323,6 +1488,9 @@ writer.Write(make([]byte, paddingSize))
 5. すべてを結合して単一の `<body>` に配置
 6. CSSを `<style>` タグに統合または `style` 属性に埋め込み
 7. 最終的なHTML構造を構築
+
+**AozoraEpub3互換の注意**:
+- 章のラッパー要素に**元の`<html>`/`<body>`の`class`/`dir`/`lang`/`xml:lang`**を引き継ぐ
 
 **例**:
 ```
@@ -1360,6 +1528,10 @@ writer.Write(make([]byte, paddingSize))
 3. 元のIDとの衝突を避けるため、プレフィックスを追加
 4. リンク先が存在するか検証
 
+**AozoraEpub3互換の注意**:
+- `#kobo.*` などのフラグメントは**そのまま保持**し、書籍内アンカーへ変換しない
+- `#kobo.*` が本文内に存在しない場合は**警告ログ**を出す（変換は継続）
+
 **例**:
 ```
 入力: <a href="chapter02.xhtml#section1">次の章へ</a>
@@ -1372,9 +1544,11 @@ writer.Write(make([]byte, paddingSize))
 
 手順:
 1. 全てのCSSファイルを読み込み
-2. 各CSSを処理（禁止プロパティ削除、単位変換）
-3. 全てを連結
-4. `<style>` タグに配置
+2. **XHTML内の`<link>`出現順**（AozoraEpub3互換）を保持
+3. 各CSSを処理（禁止プロパティ削除、単位変換）
+4. **同一セレクタの競合は後勝ち**（出現順の後ろを優先）
+5. 全てを連結
+6. `<style>` タグに配置
 
 **戦略2: インラインスタイル化**
 
@@ -1405,6 +1579,7 @@ writer.Write(make([]byte, paddingSize))
 ### 7.5 目次のfilepos計算アルゴリズム
 
 **目的**: 各目次エントリの正確なバイト位置を計算
+**前提**: 目次ソースはNCXを優先し、NCXが無い場合のみEPUB 3 navから生成する。
 
 **手順**:
 1. 統合されたHTML文字列を生成
@@ -1418,7 +1593,7 @@ writer.Write(make([]byte, paddingSize))
 
 **注意点**:
 - UTF-8エンコーディングでのバイトオフセット
-- 圧縮前のテキストでの位置
+- **テキストレコード生成に用いる圧縮前の連結HTMLバイト列**での位置
 - HTMLタグ自体も含めたオフセット
 
 ---
@@ -1462,6 +1637,7 @@ writer.Write(make([]byte, paddingSize))
 **テストデータ**:
 - 最小限のEPUB（1章のみ）
 - 複雑なEPUB（多数の章、画像、CSS）
+- **AozoraEpub3由来のEPUB3**（縦書き、ruby、tcy、page-progression-direction=rtl）
 - 異常なEPUB（壊れたXML、欠落ファイル）
 
 ### 8.2 統合テスト
@@ -1472,19 +1648,22 @@ writer.Write(make([]byte, paddingSize))
    - シンプルなEPUB → AZW3
    - 出力ファイルの存在確認
    - ファイルサイズの妥当性
+2. **AozoraEpub3互換**:
+   - `testdata/test.epub` を変換
+   - 縦書き・ruby・tcy が崩れないことを実機で確認
 
-2. **コンテンツ検証**:
+3. **コンテンツ検証**:
    - テキスト内容の保持
    - 画像の存在
    - 目次の正確性
 
-3. **メタデータ検証**:
+4. **メタデータ検証**:
    - タイトル、著者などの保持
    - 言語情報の正確性
 
-4. **実機テスト** (手動):
-   - Kindle Previewer での表示確認
-   - 実際のKindleデバイスでの動作確認
+5. **実機テスト** (手動):
+   - Kindle Paperwhite での表示確認
+   - 実際のKindleデバイスでの動作確認（Paperwhite以外）
    - アプリ（iOS/Android）での確認
 
 ### 8.3 パフォーマンステスト
@@ -1529,12 +1708,14 @@ writer.Write(make([]byte, paddingSize))
 6. 基本的なHTML統合（改ページなし）
 7. PDBヘッダーの生成
 8. MOBIヘッダーの生成
-9. テキストレコードの生成（無圧縮または基本圧縮）
-10. AZW3ファイルの書き込み
+9. テキストレコードの生成（無圧縮）
+10. **KF8必須レコードの生成（EXTH 121/125、FDST）**
+11. FLIS / FCIS / End-of-file レコードの生成
+12. AZW3ファイルの書き込み
 
-**成果物**: 
+**成果物**:
 - テキストのみのEPUBをAZW3に変換可能
-- Kindle Previewerで開ける
+- Kindle Paperwhiteで開ける
 
 **期間**: 2-3週間
 
@@ -1542,12 +1723,13 @@ writer.Write(make([]byte, paddingSize))
 
 **実装項目**:
 1. HTML/CSS変換（タグ、属性、プロパティ）
-2. 画像の読み込みと基本的な処理
-3. 画像レコードの生成
-4. 画像参照の変換（`kindle:embed:`）
-5. CSSのインライン化または統合
-6. 改ページの挿入
-7. リンク解決（章間リンク）
+2. 基本PalmDoc圧縮の実装（素朴なLZ77）
+3. 画像の読み込みと基本的な処理
+4. 画像レコードの生成
+5. 画像参照の変換（`kindle:embed:`）
+6. CSSのインライン化または統合
+7. 改ページの挿入
+8. リンク解決（章間リンク）
 
 **成果物**:
 - 画像付きEPUBの変換
@@ -1575,7 +1757,7 @@ writer.Write(make([]byte, paddingSize))
 ### 9.4 フェーズ4: 最適化と品質向上
 
 **実装項目**:
-1. PalmDoc圧縮の実装
+1. PalmDoc圧縮の最適化（ハッシュテーブルによる高速化）
 2. 画像最適化（リサイズ、圧縮）
 3. 並行処理（画像処理）
 4. エラーハンドリングの強化
@@ -1593,19 +1775,24 @@ writer.Write(make([]byte, paddingSize))
 ### 9.5 フェーズ5: 高度な機能（オプション）
 
 **実装項目**:
-1. KF8セクション（MOBI7との分離）
-2. FDSTレコード
-3. INDX（索引）
-4. HUFF/CDIC圧縮
-5. フォント埋め込み
-6. SVG対応
-7. MathML対応（数式）
+1. デュアル形式対応（MOBI7+KF8）
+2. INDX（索引）
+3. フォント埋め込み
+4. SVG対応
+5. MathML対応（数式）
+
+> **注記**: HUFF/CDIC圧縮はAmazon独自の辞書圧縮であり、通常の書籍変換には不要。KindleGenもcalibreもPalmDoc圧縮をデフォルト使用しているため、本プロジェクトでは対応しない。
 
 **成果物**:
 - 完全なKF8対応
 - 高度なレイアウトのサポート
 
 **期間**: 3-4週間
+
+### 9.7 将来の拡張（互換オプション）
+
+**候補**:
+- `--force-rtl`: `page-progression-direction="rtl"` を出力HTMLに明示的に付与（縦書きがCSSで指定されていないEPUB向け）
 
 ### 9.6 合計開発期間
 
@@ -1685,8 +1872,7 @@ writer.Write(make([]byte, paddingSize))
 
 **Kindle Previewer**:
 - ダウンロード: https://www.amazon.com/Kindle-Previewer/b?node=21381691011
-- 用途: AZW3の表示確認
-- 必須の検証ツール
+- 用途: AZW3の表示確認（**Paperwhite実機検証の補助**）
 
 **Kindle Textbook Creator**:
 - Amazon公式ツール
@@ -1703,41 +1889,16 @@ writer.Write(make([]byte, paddingSize))
 - タグ: [epub], [mobi], [kindle], [golang]
 - 用途: 実装の具体的な問題
 
-### 10.6 実装時の参考コード
+### 10.6 実装時の参考フロー
 
-**疑似コード例（最小限）**:
+**変換の概念的な流れ**:
+1. EPUBを開く（ZIP展開）
+2. OPF/NCXを解析
+3. コンテンツ読み込み（HTML統合、画像収集）
+4. 変換（HTML/CSS変換、画像最適化）
+5. MOBI生成（ヘッダー、テキストレコード、画像レコード、NCX、FLIS/FCIS/EOF）
 
-```go
-// メインの変換関数（概念的な流れ）
-func ConvertEPUBToAZW3(epubPath, outputPath string) error {
-    // 1. EPUBを開く
-    epub := OpenEPUB(epubPath)
-    
-    // 2. 解析
-    opf := epub.ParseOPF()
-    ncx := epub.ParseNCX()
-    
-    // 3. コンテンツ読み込み
-    html := CombineHTML(opf.Spine)
-    images := LoadImages(opf.Manifest)
-    
-    // 4. 変換
-    html = ConvertHTML(html)
-    images = OptimizeImages(images)
-    
-    // 5. MOBI生成
-    mobi := NewMOBIWriter(outputPath)
-    mobi.WriteHeader(opf.Metadata)
-    mobi.WriteText(html)
-    mobi.WriteImages(images)
-    mobi.WriteNCX(ncx)
-    mobi.Close()
-    
-    return nil
-}
-```
-
-**注意**: 実際の実装は各ステップをさらに細分化する
+各ステップの詳細はセクション6を参照。
 
 ---
 
@@ -1822,7 +1983,7 @@ func ConvertEPUBToAZW3(epubPath, outputPath string) error {
    - バイナリフォーマット（PDB/MOBI）の生成
 
 2. **最も複雑な部分**:
-   - PalmDoc/HUFF圧縮の実装
+   - PalmDoc圧縮の実装
    - filepos 計算の正確性
    - バイナリデータの正確な配置
 
@@ -1845,7 +2006,7 @@ func ConvertEPUBToAZW3(epubPath, outputPath string) error {
 1. プロジェクト構造とCLI
 2. EPUBのZIP展開とOPF解析
 3. 基本的なMOBI生成（無圧縮）
-4. Kindle Previewerで動作確認
+4. Kindle Paperwhiteで動作確認
 5. HTML変換と画像処理
 6. 圧縮の実装
 7. 最適化
@@ -1939,7 +2100,7 @@ writer.Write(make([]byte, padding))
 
 ### 14.1 一般的な問題と解決策
 
-**問題**: Kindle Previewerでファイルが開けない
+**問題**: Kindle Paperwhiteでファイルが開けない
 - **原因**: PDBヘッダーまたはMOBIヘッダーの不正
 - **解決**: マジックナンバー（"BOOK", "MOBI"）を確認、レコード数を検証
 

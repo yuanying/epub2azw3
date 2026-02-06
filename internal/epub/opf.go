@@ -70,8 +70,9 @@ type opfManifestItem struct {
 
 // opfSpine represents the spine section
 type opfSpine struct {
-	Toc      string       `xml:"toc,attr"`
-	ItemRefs []opfItemRef `xml:"itemref"`
+	Toc                      string       `xml:"toc,attr"`
+	PageProgressionDirection string       `xml:"page-progression-direction,attr"`
+	ItemRefs                 []opfItemRef `xml:"itemref"`
 }
 
 // opfItemRef represents an itemref in the spine
@@ -123,6 +124,9 @@ func ParseOPF(content []byte, opfDir string) (*OPF, error) {
 			Linear: linear,
 		})
 	}
+
+	// Parse page-progression-direction
+	opf.PageProgressionDirection = pkg.Spine.PageProgressionDirection
 
 	// Resolve NCX path from toc attribute
 	if pkg.Spine.Toc != "" {
@@ -239,11 +243,12 @@ func processCreatorRoles(md *Metadata, meta *opfMetadata) {
 }
 
 // joinPath joins OPF directory with a relative path
+// Always returns forward-slash separated paths (EPUB standard)
 func joinPath(base, rel string) string {
 	if base == "" {
 		return rel
 	}
-	return filepath.Join(base, rel)
+	return filepath.ToSlash(filepath.Join(base, rel))
 }
 
 // FindCoverImage finds the cover image in the manifest

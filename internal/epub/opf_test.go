@@ -1,6 +1,7 @@
 package epub
 
 import (
+	"strings"
 	"testing"
 )
 
@@ -255,6 +256,105 @@ func TestParseOPF_MinimalRequired(t *testing.T) {
 
 	if len(opf.Spine) != 1 {
 		t.Errorf("Spine count = %d, want 1", len(opf.Spine))
+	}
+}
+
+func TestParseOPF_PageProgressionDirection(t *testing.T) {
+	tests := []struct {
+		name      string
+		spineAttr string
+		want      string
+	}{
+		{
+			name:      "rtl",
+			spineAttr: ` page-progression-direction="rtl"`,
+			want:      "rtl",
+		},
+		{
+			name:      "ltr",
+			spineAttr: ` page-progression-direction="ltr"`,
+			want:      "ltr",
+		},
+		{
+			name:      "no attribute",
+			spineAttr: "",
+			want:      "",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Test</dc:title>
+    <dc:language>ja</dc:language>
+    <dc:identifier id="uid">test-001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine` + tt.spineAttr + `>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+			opf, err := ParseOPF([]byte(opfContent), "")
+			if err != nil {
+				t.Fatalf("ParseOPF failed: %v", err)
+			}
+
+			if opf.PageProgressionDirection != tt.want {
+				t.Errorf("PageProgressionDirection = %q, want %q", opf.PageProgressionDirection, tt.want)
+			}
+		})
+	}
+}
+
+func TestJoinPath_SlashNormalization(t *testing.T) {
+	tests := []struct {
+		name string
+		base string
+		rel  string
+		want string
+	}{
+		{
+			name: "basic join with trailing slash",
+			base: "OEBPS/",
+			rel:  "text/chapter1.xhtml",
+			want: "OEBPS/text/chapter1.xhtml",
+		},
+		{
+			name: "empty base returns rel as-is",
+			base: "",
+			rel:  "chapter.xhtml",
+			want: "chapter.xhtml",
+		},
+		{
+			name: "base without trailing slash",
+			base: "OEBPS",
+			rel:  "images/cover.jpg",
+			want: "OEBPS/images/cover.jpg",
+		},
+		{
+			name: "result uses forward slashes",
+			base: "content",
+			rel:  "text/ch1.xhtml",
+			want: "content/text/ch1.xhtml",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinPath(tt.base, tt.rel)
+			if got != tt.want {
+				t.Errorf("joinPath(%q, %q) = %q, want %q", tt.base, tt.rel, got, tt.want)
+			}
+			// Verify no backslashes in result (forward slash normalization)
+			if strings.Contains(got, "\\") {
+				t.Errorf("joinPath(%q, %q) = %q contains backslash", tt.base, tt.rel, got)
+			}
+		})
 	}
 }
 

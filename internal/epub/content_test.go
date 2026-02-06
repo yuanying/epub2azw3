@@ -219,6 +219,91 @@ func TestLoadContent_NoReferences(t *testing.T) {
 	}
 }
 
+func TestLoadContent_BodyAttrs(t *testing.T) {
+	tests := []struct {
+		name      string
+		xhtml     string
+		wantAttrs map[string]string
+	}{
+		{
+			name: "body with class dir lang",
+			xhtml: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Test</title></head>
+<body class="vrtl" dir="rtl" lang="ja">
+<p>Content</p>
+</body>
+</html>`,
+			wantAttrs: map[string]string{
+				"class": "vrtl",
+				"dir":   "rtl",
+				"lang":  "ja",
+			},
+		},
+		{
+			name: "html lang fallback when body has no attrs",
+			xhtml: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" lang="ja">
+<head><title>Test</title></head>
+<body>
+<p>Content</p>
+</body>
+</html>`,
+			wantAttrs: map[string]string{
+				"lang": "ja",
+			},
+		},
+		{
+			name: "body with no relevant attrs",
+			xhtml: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Test</title></head>
+<body>
+<p>Content</p>
+</body>
+</html>`,
+			wantAttrs: map[string]string{},
+		},
+		{
+			name: "body xml:lang attribute from html element",
+			xhtml: `<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml" xml:lang="en">
+<head><title>Test</title></head>
+<body>
+<p>Content</p>
+</body>
+</html>`,
+			wantAttrs: map[string]string{
+				"xml:lang": "en",
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			content, err := LoadContent("test", "test.xhtml", []byte(tt.xhtml))
+			if err != nil {
+				t.Fatalf("LoadContent failed: %v", err)
+			}
+
+			if len(content.BodyAttrs) != len(tt.wantAttrs) {
+				t.Errorf("BodyAttrs count = %d, want %d (got: %v)", len(content.BodyAttrs), len(tt.wantAttrs), content.BodyAttrs)
+			}
+
+			for key, want := range tt.wantAttrs {
+				got, ok := content.BodyAttrs[key]
+				if !ok {
+					t.Errorf("BodyAttrs missing key %q", key)
+					continue
+				}
+				if got != want {
+					t.Errorf("BodyAttrs[%q] = %q, want %q", key, got, want)
+				}
+			}
+		})
+	}
+}
+
 func TestLoadContent_MultipleStylesheets(t *testing.T) {
 	xhtmlContent := `<?xml version="1.0" encoding="UTF-8"?>
 <!DOCTYPE html>

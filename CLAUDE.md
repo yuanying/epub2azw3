@@ -40,6 +40,29 @@ EPUB Input → Parse → Validate → Transform HTML/CSS → Optimize Images →
 - **internal/util**: Utilities (path resolution, encoding, Palm epoch time conversion)
 - **pkg/epub2azw3**: Public API for library usage
 
+### HTML Integration Flow (converter ↔ epub)
+
+HTMLBuilder は複数 XHTML ファイルを単一 HTML に統合する中核ロジック:
+
+1. `epub.LoadContent()` — XHTML を goquery で解析、CSS/画像参照を収集、body/html 属性を抽出
+2. `HTMLBuilder.AddChapter()` — 章 ID（ch01, ch02, ...）を割り当て、パスマッピングを保存
+3. `HTMLBuilder.AddCSS()` / `AddChapterCSS()` — グローバル CSS はそのまま、章別 CSS は ID セレクタをネームスペース化
+4. `HTMLBuilder.Build()` — 章ごとに `<div id="chXX">` でラップ、ID をネームスペース化、`<mbp:pagebreak/>` 挿入、リンク解決
+
+**ID ネームスペース化**: HTML 内の `id="cover"` → `id="ch01-cover"` に変換。CSS 内の `#cover` → `#ch01-cover` も対応（`AddChapterCSS` 使用時）。色コード（`#333`）は `{}` ブロック内のため変換されない。
+
+**パス正規化**: `filepath.Join()` + `filepath.ToSlash()` で常にスラッシュ区切り（EPUB 標準）。`joinPath`（opf.go）と `resolvePath`（content.go）の両方で統一。
+
+### AozoraEpub3 互換性
+
+日本語縦書き EPUB（AozoraEpub3 生成）との互換性を維持する:
+- `class="vrtl"`, `class="tcy"`, `class="upr"` を削除・正規化しない
+- `writing-mode`, `text-orientation` 等の CSS プロパティを禁止プロパティ扱いにしない
+- `ruby`, `rt`, `rp` を保持
+- `#kobo.*` フラグメントはリンク変換をスキップしそのまま保持
+- 章 div に元の `<body>`/`<html>` の `class`/`dir`/`lang`/`xml:lang` 属性を引き継ぐ
+- `page-progression-direction` をメタデータとして保持
+
 ### Key Technical Details
 
 - All binary data uses **big-endian** byte order

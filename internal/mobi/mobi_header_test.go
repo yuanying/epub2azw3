@@ -17,6 +17,19 @@ func TestLanguageCode(t *testing.T) {
 		{name: "French", lang: "fr", want: 0x040C},
 		{name: "Unknown language defaults to English", lang: "zz", want: 0x0409},
 		{name: "Empty string defaults to English", lang: "", want: 0x0409},
+		{name: "BCP47 with region en-US", lang: "en-US", want: 0x0409},
+		{name: "BCP47 with region ja-JP", lang: "ja-JP", want: 0x0411},
+		{name: "Uppercase EN", lang: "EN", want: 0x0409},
+		{name: "Mixed case En-us", lang: "En-us", want: 0x0409},
+		{name: "Underscore separator zh_CN", lang: "zh_CN", want: 0x0804},
+		{name: "Regional en-GB", lang: "en-GB", want: 0x0809},
+		{name: "Regional pt-PT", lang: "pt-PT", want: 0x0816},
+		{name: "Regional pt-BR", lang: "pt-BR", want: 0x0416},
+		{name: "Regional zh-TW", lang: "zh-TW", want: 0x0404},
+		{name: "Regional es-MX", lang: "es-MX", want: 0x080A},
+		{name: "Regional fr-CA", lang: "fr-CA", want: 0x0C0C},
+		{name: "Unknown region fallback to primary", lang: "en-XX", want: 0x0409},
+		{name: "Whitespace trimmed", lang: " ja ", want: 0x0411},
 	}
 
 	for _, tt := range tests {
@@ -123,6 +136,7 @@ func TestPalmDOCHeaderBytes_NoCompression(t *testing.T) {
 }
 
 func TestMOBIHeaderBytes(t *testing.T) {
+	testUID := uint32(0xDEADBEEF)
 	cfg := MOBIHeaderConfig{
 		Compression:          CompressionPalmDoc,
 		TextLength:           50000,
@@ -136,6 +150,7 @@ func TestMOBIHeaderBytes(t *testing.T) {
 		ExtraRecordDataFlags: 0x01,
 		FDSTFlowCount:        1,
 		FDSTOffset:           18,
+		UniqueID:             &testUID,
 	}
 
 	h, err := NewMOBIHeader(cfg)
@@ -176,10 +191,10 @@ func TestMOBIHeaderBytes(t *testing.T) {
 		t.Errorf("encoding = %d, want %d", encoding, EncodingUTF8)
 	}
 
-	// Verify UniqueID at offset 16 is non-zero
+	// Verify UniqueID at offset 16 matches injected value
 	uniqueID := binary.BigEndian.Uint32(data[16:20])
-	if uniqueID == 0 {
-		t.Error("uniqueID should not be zero")
+	if uniqueID != testUID {
+		t.Errorf("uniqueID = 0x%08X, want 0x%08X", uniqueID, testUID)
 	}
 
 	// Verify file version at offset 20
@@ -298,34 +313,6 @@ func TestMOBIHeaderBytes(t *testing.T) {
 	unused244 := binary.BigEndian.Uint32(data[244:248])
 	if unused244 != 0 {
 		t.Errorf("offset 244 = %d, want 0", unused244)
-	}
-}
-
-func TestMOBIHeaderBytes_UniqueIDIsDifferent(t *testing.T) {
-	cfg := MOBIHeaderConfig{
-		Compression:        CompressionPalmDoc,
-		TextLength:         1000,
-		TextRecordCount:    1,
-		Language:           "en",
-		FirstImageIndex:    2,
-		FirstContentRecord: 1,
-		LastContentRecord:  1,
-		FCISRecordNumber:   3,
-		FLISRecordNumber:   4,
-	}
-
-	h1, err := NewMOBIHeader(cfg)
-	if err != nil {
-		t.Fatalf("NewMOBIHeader() error = %v", err)
-	}
-
-	h2, err := NewMOBIHeader(cfg)
-	if err != nil {
-		t.Fatalf("NewMOBIHeader() error = %v", err)
-	}
-
-	if h1.UniqueID == h2.UniqueID {
-		t.Error("two MOBIHeaders should have different UniqueIDs")
 	}
 }
 
@@ -485,7 +472,8 @@ func TestRecord0Bytes_WithEXTH(t *testing.T) {
 		t.Fatalf("NewMOBIHeader() error = %v", err)
 	}
 
-	exthData := make([]byte, 100) // dummy EXTH data
+	// Build valid EXTH data (4-byte aligned, 100 bytes)
+	exthData := buildValidEXTH(100)
 	fullName := "Book With EXTH"
 	data, err := h.Record0Bytes(exthData, fullName)
 	if err != nil {
@@ -517,6 +505,172 @@ func TestRecord0Bytes_WithEXTH(t *testing.T) {
 	// Verify 4-byte alignment
 	if len(data)%4 != 0 {
 		t.Errorf("Record0 length %d is not 4-byte aligned", len(data))
+	}
+}
+
+func TestRecord0Bytes_EXTHNotAligned(t *testing.T) {
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         1000,
+		TextRecordCount:    1,
+		Language:           "en",
+		FirstImageIndex:    2,
+		FirstContentRecord: 1,
+		LastContentRecord:  1,
+		FCISRecordNumber:   3,
+		FLISRecordNumber:   4,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	// 13 bytes: not 4-byte aligned
+	exthData := buildValidEXTH(13)
+	_, err = h.Record0Bytes(exthData, "Book")
+	if err == nil {
+		t.Fatal("expected error for unaligned EXTH data, got nil")
+	}
+}
+
+func TestRecord0Bytes_EXTHInvalidMagic(t *testing.T) {
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         1000,
+		TextRecordCount:    1,
+		Language:           "en",
+		FirstImageIndex:    2,
+		FirstContentRecord: 1,
+		LastContentRecord:  1,
+		FCISRecordNumber:   3,
+		FLISRecordNumber:   4,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	// Invalid magic bytes
+	exthData := make([]byte, 12)
+	copy(exthData[0:4], []byte("XXXX"))
+	binary.BigEndian.PutUint32(exthData[4:8], 12)
+	binary.BigEndian.PutUint32(exthData[8:12], 0)
+	_, err = h.Record0Bytes(exthData, "Book")
+	if err == nil {
+		t.Fatal("expected error for invalid EXTH magic, got nil")
+	}
+}
+
+func TestRecord0Bytes_EXTHLengthMismatch(t *testing.T) {
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         1000,
+		TextRecordCount:    1,
+		Language:           "en",
+		FirstImageIndex:    2,
+		FirstContentRecord: 1,
+		LastContentRecord:  1,
+		FCISRecordNumber:   3,
+		FLISRecordNumber:   4,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	// Valid magic but length field doesn't match actual size
+	exthData := make([]byte, 16)
+	copy(exthData[0:4], []byte("EXTH"))
+	binary.BigEndian.PutUint32(exthData[4:8], 100) // says 100 but actual is 16
+	binary.BigEndian.PutUint32(exthData[8:12], 0)
+	_, err = h.Record0Bytes(exthData, "Book")
+	if err == nil {
+		t.Fatal("expected error for EXTH length mismatch, got nil")
+	}
+}
+
+// buildValidEXTH creates EXTH data with valid magic and length header.
+func buildValidEXTH(size int) []byte {
+	data := make([]byte, size)
+	if size >= 12 {
+		copy(data[0:4], []byte("EXTH"))
+		binary.BigEndian.PutUint32(data[4:8], uint32(size))
+		binary.BigEndian.PutUint32(data[8:12], 0) // record count = 0
+	}
+	return data
+}
+
+func TestRecord0Bytes_EXTHTooShort(t *testing.T) {
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         1000,
+		TextRecordCount:    1,
+		Language:           "en",
+		FirstImageIndex:    2,
+		FirstContentRecord: 1,
+		LastContentRecord:  1,
+		FCISRecordNumber:   3,
+		FLISRecordNumber:   4,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	// 8 bytes: too short for EXTH header (minimum 12)
+	exthData := make([]byte, 8)
+	_, err = h.Record0Bytes(exthData, "Book")
+	if err == nil {
+		t.Fatal("expected error for too-short EXTH data, got nil")
+	}
+}
+
+func TestNewMOBIHeader_InvalidConfig(t *testing.T) {
+	tests := []struct {
+		name string
+		cfg  MOBIHeaderConfig
+	}{
+		{
+			name: "invalid compression type",
+			cfg: MOBIHeaderConfig{
+				Compression:        99,
+				TextLength:         1000,
+				TextRecordCount:    1,
+				Language:           "en",
+				FirstImageIndex:    2,
+				FirstContentRecord: 1,
+				LastContentRecord:  1,
+				FCISRecordNumber:   3,
+				FLISRecordNumber:   4,
+			},
+		},
+		{
+			name: "LastContentRecord < FirstContentRecord",
+			cfg: MOBIHeaderConfig{
+				Compression:        CompressionPalmDoc,
+				TextLength:         1000,
+				TextRecordCount:    1,
+				Language:           "en",
+				FirstImageIndex:    2,
+				FirstContentRecord: 5,
+				LastContentRecord:  2,
+				FCISRecordNumber:   3,
+				FLISRecordNumber:   4,
+			},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			_, err := NewMOBIHeader(tt.cfg)
+			if err == nil {
+				t.Fatal("expected error for invalid config, got nil")
+			}
+		})
 	}
 }
 

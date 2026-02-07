@@ -5,10 +5,14 @@ import (
 	"crypto/rand"
 	"encoding/binary"
 	"fmt"
+	"math"
+	"strings"
 )
 
-// languageCodeMap maps BCP 47 language tags to MOBI language codes.
+// languageCodeMap maps BCP 47 language tags to MOBI language codes (Windows LCID).
+// Full regional tags (e.g. "en-gb") are checked first, then primary subtag (e.g. "en").
 var languageCodeMap = map[string]uint32{
+	// Primary language tags
 	"en": 0x0409, // English (US)
 	"ja": 0x0411, // Japanese
 	"de": 0x0407, // German
@@ -20,6 +24,17 @@ var languageCodeMap = map[string]uint32{
 	"ko": 0x0412, // Korean
 	"nl": 0x0413, // Dutch
 	"ru": 0x0419, // Russian
+	// Regional variants
+	"en-gb": 0x0809, // English (UK)
+	"en-au": 0x0C09, // English (Australia)
+	"pt-pt": 0x0816, // Portuguese (Portugal)
+	"pt-br": 0x0416, // Portuguese (Brazil)
+	"zh-tw": 0x0404, // Chinese (Traditional)
+	"zh-cn": 0x0804, // Chinese (Simplified)
+	"es-mx": 0x080A, // Spanish (Mexico)
+	"fr-ca": 0x0C0C, // French (Canada)
+	"de-at": 0x0C07, // German (Austria)
+	"de-ch": 0x0807, // German (Switzerland)
 }
 
 const (
@@ -54,10 +69,25 @@ const (
 )
 
 // LanguageCode converts a BCP 47 language tag to a MOBI language code.
+// Tries full regional tag first (e.g. "en-gb"), then falls back to primary subtag (e.g. "en").
 // Returns defaultLanguageCode (English US) for unknown or empty strings.
 func LanguageCode(lang string) uint32 {
+	lang = strings.TrimSpace(lang)
+	if lang == "" {
+		return defaultLanguageCode
+	}
+	// Normalize: lowercase and replace _ with -
+	lang = strings.ToLower(lang)
+	lang = strings.ReplaceAll(lang, "_", "-")
+	// Try full tag first (e.g. "en-gb")
 	if code, ok := languageCodeMap[lang]; ok {
 		return code
+	}
+	// Fallback to primary subtag (e.g. "en")
+	if i := strings.IndexByte(lang, '-'); i >= 0 {
+		if code, ok := languageCodeMap[lang[:i]]; ok {
+			return code
+		}
 	}
 	return defaultLanguageCode
 }
@@ -68,6 +98,7 @@ type MOBIHeaderConfig struct {
 	TextLength           uint32
 	TextRecordCount      uint16
 	Language             string
+	UniqueID             *uint32 // nil means random generation
 	FirstImageIndex      uint32
 	FirstContentRecord   uint16
 	LastContentRecord    uint16
@@ -96,11 +127,24 @@ type MOBIHeader struct {
 }
 
 // NewMOBIHeader creates a MOBIHeader from the given configuration.
-// It generates a random UniqueID using crypto/rand.
+// If cfg.UniqueID is nil, a random UniqueID is generated using crypto/rand.
 func NewMOBIHeader(cfg MOBIHeaderConfig) (*MOBIHeader, error) {
-	uid, err := generateUniqueID()
-	if err != nil {
-		return nil, fmt.Errorf("failed to generate unique ID: %w", err)
+	if cfg.Compression != CompressionNone && cfg.Compression != CompressionPalmDoc {
+		return nil, fmt.Errorf("unsupported compression type: %d", cfg.Compression)
+	}
+	if cfg.LastContentRecord < cfg.FirstContentRecord {
+		return nil, fmt.Errorf("invalid content record range: first=%d > last=%d", cfg.FirstContentRecord, cfg.LastContentRecord)
+	}
+
+	var uid uint32
+	if cfg.UniqueID != nil {
+		uid = *cfg.UniqueID
+	} else {
+		var err error
+		uid, err = generateUniqueID()
+		if err != nil {
+			return nil, fmt.Errorf("failed to generate unique ID: %w", err)
+		}
 	}
 
 	return &MOBIHeader{
@@ -371,16 +415,29 @@ func (h *MOBIHeader) MOBIHeaderBytes(fullNameOffset, fullNameLength, exthFlags u
 
 // Record0Bytes assembles the complete Record 0: PalmDOC header + MOBI header + EXTH data + Full Name + padding.
 // exthData may be nil if no EXTH records are present.
+// When exthData is provided, it must have a valid EXTH header (magic "EXTH", correct length) and be 4-byte aligned.
 // fullName is the book title encoded as UTF-8.
 func (h *MOBIHeader) Record0Bytes(exthData []byte, fullName string) ([]byte, error) {
+	if err := validateEXTH(exthData); err != nil {
+		return nil, err
+	}
+
 	palmDoc, err := h.PalmDOCHeaderBytes()
 	if err != nil {
 		return nil, fmt.Errorf("failed to build PalmDOC header: %w", err)
 	}
 
+	// Validate sizes before uint32 conversion
+	fullNameBytes := []byte(fullName)
+	if len(exthData) > math.MaxUint32-MOBIHeaderSize {
+		return nil, fmt.Errorf("EXTH data too large: %d bytes", len(exthData))
+	}
+	if len(fullNameBytes) > math.MaxUint32 {
+		return nil, fmt.Errorf("full name too large: %d bytes", len(fullNameBytes))
+	}
+
 	// Calculate Full Name position relative to MOBI header start
 	fullNameOffset := uint32(MOBIHeaderSize + len(exthData))
-	fullNameBytes := []byte(fullName)
 	fullNameLength := uint32(len(fullNameBytes))
 
 	// Determine EXTH flags
@@ -427,6 +484,28 @@ func (h *MOBIHeader) Record0Bytes(exthData []byte, fullName string) ([]byte, err
 	}
 
 	return buf.Bytes(), nil
+}
+
+// validateEXTH validates EXTH data integrity.
+// Returns nil if exthData is nil or empty (no EXTH present).
+func validateEXTH(exthData []byte) error {
+	if len(exthData) == 0 {
+		return nil
+	}
+	if len(exthData) < 12 {
+		return fmt.Errorf("EXTH data too short: got %d bytes, need at least 12", len(exthData))
+	}
+	if string(exthData[0:4]) != "EXTH" {
+		return fmt.Errorf("invalid EXTH magic: got %q, want %q", string(exthData[0:4]), "EXTH")
+	}
+	exthLen := binary.BigEndian.Uint32(exthData[4:8])
+	if int(exthLen) != len(exthData) {
+		return fmt.Errorf("EXTH length mismatch: header says %d, actual %d", exthLen, len(exthData))
+	}
+	if len(exthData)%4 != 0 {
+		return fmt.Errorf("EXTH data must be 4-byte aligned: got %d bytes", len(exthData))
+	}
+	return nil
 }
 
 // generateUniqueID generates a random uint32 using crypto/rand.

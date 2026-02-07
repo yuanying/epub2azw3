@@ -11,12 +11,6 @@ linters:
     - goimports
     - misspell
 
-linters-settings:
-  gocritic:
-    disabled-checks:
-      - fieldalignment
-      - hugeParam
-
 issues:
   exclude-rules:
     - path: _test\.go
@@ -25,3 +19,4 @@ issues:
     - path: cmd/test/
       linters:
         - errcheck
+        - gocritic

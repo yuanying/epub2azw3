@@ -2,10 +2,10 @@ package epub
 
 // OPF represents the parsed Open Package Format document
 type OPF struct {
-	Metadata                Metadata
-	Manifest                map[string]ManifestItem // id -> item
-	Spine                   []SpineItem
-	NCXPath                 string
+	Metadata                 Metadata
+	Manifest                 map[string]ManifestItem // id -> item
+	Spine                    []SpineItem
+	NCXPath                  string
 	PageProgressionDirection string // "rtl", "ltr", or "" (not specified)
 }
 

@@ -21,6 +21,9 @@ go test -v -run TestFunctionName ./internal/epub
 # Run tests with coverage
 go test -coverprofile=coverage.out ./...
 go tool cover -html=coverage.out
+
+# Run linter
+go tool golangci-lint run ./...
 ```
 
 ## Architecture

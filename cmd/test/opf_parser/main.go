@@ -61,7 +61,7 @@ func main() {
 	if opfDir == "." {
 		opfDir = ""
 	} else {
-		opfDir = opfDir + "/"
+		opfDir += "/"
 	}
 	opf, err := epub.ParseOPF(opfContent, opfDir)
 	if err != nil {
@@ -164,9 +164,7 @@ func main() {
 	hasSpecial := false
 	for id, item := range opf.Manifest {
 		if len(item.Properties) > 0 {
-			if !hasSpecial {
-				hasSpecial = true
-			}
+			hasSpecial = true
 			fmt.Printf("  %s: %s (properties: %v)\n", id, item.Href, item.Properties)
 		}
 	}

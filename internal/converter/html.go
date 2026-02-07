@@ -105,11 +105,12 @@ func namespaceIDSelectors(chapterID, css string) string {
 
 		if inString != 0 {
 			result.WriteByte(ch)
-			if escapeNext {
+			switch {
+			case escapeNext:
 				escapeNext = false
-			} else if ch == '\\' {
+			case ch == '\\':
 				escapeNext = true
-			} else if ch == inString {
+			case ch == inString:
 				inString = 0
 			}
 			i++

@@ -142,6 +142,233 @@ func (h *MOBIHeader) PalmDOCHeaderBytes() ([]byte, error) {
 	return buf.Bytes(), nil
 }
 
+// MOBIHeaderBytes serializes the 248-byte MOBI header.
+// fullNameOffset and fullNameLength specify the Full Name position relative to the MOBI header start.
+// exthFlags specifies the EXTH flags (use EXTHFlagPresent when EXTH data is present).
+func (h *MOBIHeader) MOBIHeaderBytes(fullNameOffset, fullNameLength, exthFlags uint32) ([]byte, error) {
+	buf := &bytes.Buffer{}
+
+	writeU32 := func(v uint32) error {
+		return binary.Write(buf, binary.BigEndian, v)
+	}
+	writeU16 := func(v uint16) error {
+		return binary.Write(buf, binary.BigEndian, v)
+	}
+
+	// Offset 0: "MOBI" identifier
+	if _, err := buf.Write([]byte("MOBI")); err != nil {
+		return nil, fmt.Errorf("failed to write MOBI identifier: %w", err)
+	}
+
+	// Offset 4: header length
+	if err := writeU32(MOBIHeaderSize); err != nil {
+		return nil, fmt.Errorf("failed to write header length: %w", err)
+	}
+
+	// Offset 8: MOBI type
+	if err := writeU32(MOBITypeKF8); err != nil {
+		return nil, fmt.Errorf("failed to write MOBI type: %w", err)
+	}
+
+	// Offset 12: text encoding
+	if err := writeU32(EncodingUTF8); err != nil {
+		return nil, fmt.Errorf("failed to write text encoding: %w", err)
+	}
+
+	// Offset 16: unique ID
+	if err := writeU32(h.UniqueID); err != nil {
+		return nil, fmt.Errorf("failed to write unique ID: %w", err)
+	}
+
+	// Offset 20: file version
+	if err := writeU32(FileVersionKF8); err != nil {
+		return nil, fmt.Errorf("failed to write file version: %w", err)
+	}
+
+	// Offsets 24-63: unused index fields (all 0xFFFFFFFF), 10 fields
+	for i := 0; i < 10; i++ {
+		if err := writeU32(0xFFFFFFFF); err != nil {
+			return nil, fmt.Errorf("failed to write unused index field: %w", err)
+		}
+	}
+
+	// Offset 64: first non-book index (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write first non-book index: %w", err)
+	}
+
+	// Offset 68: Full Name Offset
+	if err := writeU32(fullNameOffset); err != nil {
+		return nil, fmt.Errorf("failed to write full name offset: %w", err)
+	}
+
+	// Offset 72: Full Name Length
+	if err := writeU32(fullNameLength); err != nil {
+		return nil, fmt.Errorf("failed to write full name length: %w", err)
+	}
+
+	// Offset 76: language code
+	if err := writeU32(h.LanguageCode); err != nil {
+		return nil, fmt.Errorf("failed to write language code: %w", err)
+	}
+
+	// Offset 80: first image index
+	if err := writeU32(h.FirstImageIndex); err != nil {
+		return nil, fmt.Errorf("failed to write first image index: %w", err)
+	}
+
+	// Offset 84: first HUFF index (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write HUFF first index: %w", err)
+	}
+
+	// Offset 88: HUFF record count (0)
+	if err := writeU32(0); err != nil {
+		return nil, fmt.Errorf("failed to write HUFF record count: %w", err)
+	}
+
+	// Offset 92: HUFF table index (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write HUFF table index: %w", err)
+	}
+
+	// Offset 96: HUFF table record count (0)
+	if err := writeU32(0); err != nil {
+		return nil, fmt.Errorf("failed to write HUFF table count: %w", err)
+	}
+
+	// Offset 100: EXTH flags
+	if err := writeU32(exthFlags); err != nil {
+		return nil, fmt.Errorf("failed to write EXTH flags: %w", err)
+	}
+
+	// Offsets 104-135: unused (32 bytes of 0x00)
+	if _, err := buf.Write(make([]byte, 32)); err != nil {
+		return nil, fmt.Errorf("failed to write unused block: %w", err)
+	}
+
+	// Offset 136: DRM offset (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write DRM offset: %w", err)
+	}
+
+	// Offset 140: DRM count (0)
+	if err := writeU32(0); err != nil {
+		return nil, fmt.Errorf("failed to write DRM count: %w", err)
+	}
+
+	// Offset 144: DRM size (0)
+	if err := writeU32(0); err != nil {
+		return nil, fmt.Errorf("failed to write DRM size: %w", err)
+	}
+
+	// Offset 148: DRM flags (0)
+	if err := writeU32(0); err != nil {
+		return nil, fmt.Errorf("failed to write DRM flags: %w", err)
+	}
+
+	// Offsets 152-159: unused (8 bytes of 0x00)
+	if _, err := buf.Write(make([]byte, 8)); err != nil {
+		return nil, fmt.Errorf("failed to write unused block: %w", err)
+	}
+
+	// Offset 160: first content record
+	if err := writeU16(h.FirstContentRecord); err != nil {
+		return nil, fmt.Errorf("failed to write first content record: %w", err)
+	}
+
+	// Offset 162: last content record
+	if err := writeU16(h.LastContentRecord); err != nil {
+		return nil, fmt.Errorf("failed to write last content record: %w", err)
+	}
+
+	// Offset 164: unused (0x00000001)
+	if err := writeU32(1); err != nil {
+		return nil, fmt.Errorf("failed to write unused field: %w", err)
+	}
+
+	// Offset 168: FCIS record number
+	if err := writeU32(h.FCISRecordNumber); err != nil {
+		return nil, fmt.Errorf("failed to write FCIS record number: %w", err)
+	}
+
+	// Offset 172: FCIS record count (1)
+	if err := writeU32(1); err != nil {
+		return nil, fmt.Errorf("failed to write FCIS record count: %w", err)
+	}
+
+	// Offset 176: FLIS record number
+	if err := writeU32(h.FLISRecordNumber); err != nil {
+		return nil, fmt.Errorf("failed to write FLIS record number: %w", err)
+	}
+
+	// Offset 180: FLIS record count (1)
+	if err := writeU32(1); err != nil {
+		return nil, fmt.Errorf("failed to write FLIS record count: %w", err)
+	}
+
+	// Offsets 184-191: unused (8 bytes of 0x00)
+	if _, err := buf.Write(make([]byte, 8)); err != nil {
+		return nil, fmt.Errorf("failed to write unused block: %w", err)
+	}
+
+	// Offset 192: unused (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write unused field: %w", err)
+	}
+
+	// Offset 196: unused (0x00000000)
+	if err := writeU32(0); err != nil {
+		return nil, fmt.Errorf("failed to write unused field: %w", err)
+	}
+
+	// Offset 200: unused (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write unused field: %w", err)
+	}
+
+	// Offset 204: unused (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write unused field: %w", err)
+	}
+
+	// Offset 208: extra record data flags
+	if err := writeU32(h.ExtraRecordDataFlags); err != nil {
+		return nil, fmt.Errorf("failed to write extra record data flags: %w", err)
+	}
+
+	// Offset 212: INDX record offset (0xFFFFFFFF)
+	if err := writeU32(0xFFFFFFFF); err != nil {
+		return nil, fmt.Errorf("failed to write INDX record offset: %w", err)
+	}
+
+	// KF8 additional fields (offsets 216-247)
+
+	// Offsets 216-232: unused (5 * 0xFFFFFFFF)
+	for i := 0; i < 5; i++ {
+		if err := writeU32(0xFFFFFFFF); err != nil {
+			return nil, fmt.Errorf("failed to write KF8 unused field: %w", err)
+		}
+	}
+
+	// Offset 236: FDST flow count
+	if err := writeU32(h.FDSTFlowCount); err != nil {
+		return nil, fmt.Errorf("failed to write FDST flow count: %w", err)
+	}
+
+	// Offset 240: FDST offset
+	if err := writeU32(h.FDSTOffset); err != nil {
+		return nil, fmt.Errorf("failed to write FDST offset: %w", err)
+	}
+
+	// Offset 244: unused (0)
+	if err := writeU32(0); err != nil {
+		return nil, fmt.Errorf("failed to write unused field: %w", err)
+	}
+
+	return buf.Bytes(), nil
+}
+
 // generateUniqueID generates a random uint32 using crypto/rand.
 func generateUniqueID() (uint32, error) {
 	var b [4]byte

@@ -405,3 +405,206 @@ func TestMOBIHeaderBytes_FullNameOffsetAndLength(t *testing.T) {
 		t.Errorf("Full Name Length = %d, want %d", gotLength, fullNameLength)
 	}
 }
+
+func TestRecord0Bytes_WithoutEXTH(t *testing.T) {
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         5000,
+		TextRecordCount:    2,
+		Language:           "en",
+		FirstImageIndex:    3,
+		FirstContentRecord: 1,
+		LastContentRecord:  2,
+		FCISRecordNumber:   5,
+		FLISRecordNumber:   6,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	fullName := "Test Book Title"
+	data, err := h.Record0Bytes(nil, fullName)
+	if err != nil {
+		t.Fatalf("Record0Bytes() error = %v", err)
+	}
+
+	// Record 0 = PalmDOC(16) + MOBI(248) + Full Name + padding
+	fullNameBytes := []byte(fullName)
+	expectedOffset := uint32(MOBIHeaderSize) // 248 (no EXTH)
+	expectedLength := uint32(len(fullNameBytes))
+
+	// Check Full Name Offset in MOBI header (offset 68 from MOBI start = 16+68 from record start)
+	gotOffset := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+68 : PalmDOCHeaderSize+72])
+	if gotOffset != expectedOffset {
+		t.Errorf("Full Name Offset = %d, want %d", gotOffset, expectedOffset)
+	}
+
+	// Check Full Name Length in MOBI header
+	gotLength := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+72 : PalmDOCHeaderSize+76])
+	if gotLength != expectedLength {
+		t.Errorf("Full Name Length = %d, want %d", gotLength, expectedLength)
+	}
+
+	// Verify Full Name content at expected position
+	nameStart := PalmDOCHeaderSize + int(expectedOffset)
+	nameEnd := nameStart + int(expectedLength)
+	gotName := string(data[nameStart:nameEnd])
+	if gotName != fullName {
+		t.Errorf("Full Name = %q, want %q", gotName, fullName)
+	}
+
+	// Check EXTH flags = 0 (no EXTH)
+	exthFlags := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+100 : PalmDOCHeaderSize+104])
+	if exthFlags != 0 {
+		t.Errorf("EXTH flags = 0x%08X, want 0x00000000", exthFlags)
+	}
+
+	// Verify 4-byte alignment
+	if len(data)%4 != 0 {
+		t.Errorf("Record0 length %d is not 4-byte aligned", len(data))
+	}
+}
+
+func TestRecord0Bytes_WithEXTH(t *testing.T) {
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         5000,
+		TextRecordCount:    2,
+		Language:           "en",
+		FirstImageIndex:    3,
+		FirstContentRecord: 1,
+		LastContentRecord:  2,
+		FCISRecordNumber:   5,
+		FLISRecordNumber:   6,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	exthData := make([]byte, 100) // dummy EXTH data
+	fullName := "Book With EXTH"
+	data, err := h.Record0Bytes(exthData, fullName)
+	if err != nil {
+		t.Fatalf("Record0Bytes() error = %v", err)
+	}
+
+	// Full Name Offset should be 248 + 100 = 348
+	expectedOffset := uint32(MOBIHeaderSize + len(exthData))
+	gotOffset := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+68 : PalmDOCHeaderSize+72])
+	if gotOffset != expectedOffset {
+		t.Errorf("Full Name Offset = %d, want %d", gotOffset, expectedOffset)
+	}
+
+	// Check EXTH flags = 0x40
+	exthFlags := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+100 : PalmDOCHeaderSize+104])
+	if exthFlags != EXTHFlagPresent {
+		t.Errorf("EXTH flags = 0x%08X, want 0x%08X", exthFlags, EXTHFlagPresent)
+	}
+
+	// Verify Full Name content
+	fullNameBytes := []byte(fullName)
+	nameStart := PalmDOCHeaderSize + int(expectedOffset)
+	nameEnd := nameStart + len(fullNameBytes)
+	gotName := string(data[nameStart:nameEnd])
+	if gotName != fullName {
+		t.Errorf("Full Name = %q, want %q", gotName, fullName)
+	}
+
+	// Verify 4-byte alignment
+	if len(data)%4 != 0 {
+		t.Errorf("Record0 length %d is not 4-byte aligned", len(data))
+	}
+}
+
+func TestRecord0Bytes_Padding(t *testing.T) {
+	tests := []struct {
+		name     string
+		fullName string
+	}{
+		{name: "length 1 (pad 3)", fullName: "A"},
+		{name: "length 2 (pad 2)", fullName: "AB"},
+		{name: "length 3 (pad 1)", fullName: "ABC"},
+		{name: "length 4 (pad 0)", fullName: "ABCD"},
+		{name: "length 5 (pad 3)", fullName: "ABCDE"},
+		{name: "length 8 (pad 0)", fullName: "ABCDEFGH"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			cfg := MOBIHeaderConfig{
+				Compression:        CompressionPalmDoc,
+				TextLength:         1000,
+				TextRecordCount:    1,
+				Language:           "en",
+				FirstImageIndex:    2,
+				FirstContentRecord: 1,
+				LastContentRecord:  1,
+				FCISRecordNumber:   3,
+				FLISRecordNumber:   4,
+			}
+
+			h, err := NewMOBIHeader(cfg)
+			if err != nil {
+				t.Fatalf("NewMOBIHeader() error = %v", err)
+			}
+
+			data, err := h.Record0Bytes(nil, tt.fullName)
+			if err != nil {
+				t.Fatalf("Record0Bytes() error = %v", err)
+			}
+
+			if len(data)%4 != 0 {
+				t.Errorf("Record0 length %d is not 4-byte aligned for fullName %q", len(data), tt.fullName)
+			}
+		})
+	}
+}
+
+func TestRecord0Bytes_MultibyteName(t *testing.T) {
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         1000,
+		TextRecordCount:    1,
+		Language:           "ja",
+		FirstImageIndex:    2,
+		FirstContentRecord: 1,
+		LastContentRecord:  1,
+		FCISRecordNumber:   3,
+		FLISRecordNumber:   4,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	fullName := "日本語の本"
+	data, err := h.Record0Bytes(nil, fullName)
+	if err != nil {
+		t.Fatalf("Record0Bytes() error = %v", err)
+	}
+
+	// Verify byte length (not rune count)
+	fullNameBytes := []byte(fullName)
+	gotLength := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+72 : PalmDOCHeaderSize+76])
+	if gotLength != uint32(len(fullNameBytes)) {
+		t.Errorf("Full Name Length = %d, want %d (byte length)", gotLength, len(fullNameBytes))
+	}
+
+	// Verify content
+	nameStart := PalmDOCHeaderSize + MOBIHeaderSize
+	nameEnd := nameStart + len(fullNameBytes)
+	gotName := string(data[nameStart:nameEnd])
+	if gotName != fullName {
+		t.Errorf("Full Name = %q, want %q", gotName, fullName)
+	}
+
+	// Verify alignment
+	if len(data)%4 != 0 {
+		t.Errorf("Record0 length %d is not 4-byte aligned", len(data))
+	}
+}

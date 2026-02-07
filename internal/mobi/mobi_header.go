@@ -369,6 +369,66 @@ func (h *MOBIHeader) MOBIHeaderBytes(fullNameOffset, fullNameLength, exthFlags u
 	return buf.Bytes(), nil
 }
 
+// Record0Bytes assembles the complete Record 0: PalmDOC header + MOBI header + EXTH data + Full Name + padding.
+// exthData may be nil if no EXTH records are present.
+// fullName is the book title encoded as UTF-8.
+func (h *MOBIHeader) Record0Bytes(exthData []byte, fullName string) ([]byte, error) {
+	palmDoc, err := h.PalmDOCHeaderBytes()
+	if err != nil {
+		return nil, fmt.Errorf("failed to build PalmDOC header: %w", err)
+	}
+
+	// Calculate Full Name position relative to MOBI header start
+	fullNameOffset := uint32(MOBIHeaderSize + len(exthData))
+	fullNameBytes := []byte(fullName)
+	fullNameLength := uint32(len(fullNameBytes))
+
+	// Determine EXTH flags
+	var exthFlags uint32
+	if len(exthData) > 0 {
+		exthFlags = EXTHFlagPresent
+	}
+
+	mobiHeader, err := h.MOBIHeaderBytes(fullNameOffset, fullNameLength, exthFlags)
+	if err != nil {
+		return nil, fmt.Errorf("failed to build MOBI header: %w", err)
+	}
+
+	buf := &bytes.Buffer{}
+
+	// PalmDOC header (16 bytes)
+	if _, err := buf.Write(palmDoc); err != nil {
+		return nil, fmt.Errorf("failed to write PalmDOC header: %w", err)
+	}
+
+	// MOBI header (248 bytes)
+	if _, err := buf.Write(mobiHeader); err != nil {
+		return nil, fmt.Errorf("failed to write MOBI header: %w", err)
+	}
+
+	// EXTH data (variable, may be empty)
+	if len(exthData) > 0 {
+		if _, err := buf.Write(exthData); err != nil {
+			return nil, fmt.Errorf("failed to write EXTH data: %w", err)
+		}
+	}
+
+	// Full Name (UTF-8)
+	if _, err := buf.Write(fullNameBytes); err != nil {
+		return nil, fmt.Errorf("failed to write full name: %w", err)
+	}
+
+	// Pad to 4-byte boundary
+	padLen := (4 - (buf.Len() % 4)) % 4
+	if padLen > 0 {
+		if _, err := buf.Write(make([]byte, padLen)); err != nil {
+			return nil, fmt.Errorf("failed to write padding: %w", err)
+		}
+	}
+
+	return buf.Bytes(), nil
+}
+
 // generateUniqueID generates a random uint32 using crypto/rand.
 func generateUniqueID() (uint32, error) {
 	var b [4]byte

@@ -6,7 +6,7 @@ toolchain go1.24.10
 
 require (
 	github.com/PuerkitoBio/goquery v1.11.0
-	github.com/spf13/cobra v1.10.1
+	github.com/spf13/cobra v1.10.2
 )
 
 require (

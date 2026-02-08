@@ -477,6 +477,172 @@ func TestPipeline_Convert_NoValidChapters(t *testing.T) {
 	}
 }
 
+// createImageTestEPUB creates an EPUB with images that reference them via relative paths.
+// This tests that img src resolution and image record generation work correctly.
+func createImageTestEPUB(t *testing.T, dir string) string {
+	t.Helper()
+	epubPath := filepath.Join(dir, "images.epub")
+	f, err := os.Create(epubPath)
+	if err != nil {
+		t.Fatalf("failed to create test EPUB: %v", err)
+	}
+
+	w := zip.NewWriter(f)
+
+	header := &zip.FileHeader{
+		Name:   "mimetype",
+		Method: zip.Store,
+	}
+	mw, _ := w.CreateHeader(header)
+	mw.Write([]byte("application/epub+zip"))
+
+	cw, _ := w.Create("META-INF/container.xml")
+	cw.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+
+	// OPF with images (including SVG which should be filtered)
+	ow, _ := w.Create("OEBPS/content.opf")
+	ow.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Image Test Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">urn:uuid:img-test</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover-img" href="images/cover.jpg" media-type="image/jpeg"/>
+    <item id="photo" href="images/photo.png" media-type="image/png"/>
+    <item id="icon-svg" href="images/icon.svg" media-type="image/svg+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`))
+
+	// XHTML references images via relative paths (../images/cover.jpg from text/)
+	xw, _ := w.Create("OEBPS/text/chapter1.xhtml")
+	xw.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 1</title></head>
+<body>
+<h1>Images</h1>
+<img src="../images/cover.jpg" alt="Cover"/>
+<img src="../images/photo.png" alt="Photo"/>
+</body>
+</html>`))
+
+	// Create fake image files
+	iw, _ := w.Create("OEBPS/images/cover.jpg")
+	// Minimal JPEG: starts with FF D8 FF
+	iw.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'})
+
+	pw, _ := w.Create("OEBPS/images/photo.png")
+	// Minimal PNG header
+	pw.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+
+	sw, _ := w.Create("OEBPS/images/icon.svg")
+	sw.Write([]byte(`<svg xmlns="http://www.w3.org/2000/svg"><circle r="10"/></svg>`))
+
+	w.Close()
+	f.Close()
+
+	return epubPath
+}
+
+func TestPipeline_Convert_ImageRecords(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createImageTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+	})
+
+	err := p.Convert()
+	if err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	// Get Record 0 and check firstImageIndex
+	rec0 := extractRecord(data, 0)
+	if len(rec0) < 112 {
+		t.Fatal("Record 0 too short")
+	}
+
+	// firstImageIndex at MOBI header offset 80, plus 16-byte PalmDoc header = offset 96 in Record 0
+	firstImageIndex := readUint32BE(rec0, 96)
+	if firstImageIndex == 0xFFFFFFFF {
+		t.Fatal("firstImageIndex is 0xFFFFFFFF, expected images to be present")
+	}
+
+	// Verify image records exist (2 images: JPEG and PNG, SVG should be filtered)
+	imgRec1 := extractRecord(data, int(firstImageIndex))
+	if len(imgRec1) == 0 {
+		t.Fatal("first image record is empty")
+	}
+
+	imgRec2 := extractRecord(data, int(firstImageIndex)+1)
+	if len(imgRec2) == 0 {
+		t.Fatal("second image record is empty")
+	}
+
+	t.Logf("firstImageIndex=%d, img1 size=%d, img2 size=%d",
+		firstImageIndex, len(imgRec1), len(imgRec2))
+}
+
+func TestPipeline_Convert_SVGFiltered(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createImageTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+	})
+
+	err := p.Convert()
+	if err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	// Get Record 0 and check firstImageIndex
+	rec0 := extractRecord(data, 0)
+	firstImageIndex := readUint32BE(rec0, 96)
+
+	// Count image records: should be 2 (JPEG + PNG), not 3 (SVG filtered)
+	// FDST magic is "FDST" - check the record after the expected 2 images
+	fdstRec := extractRecord(data, int(firstImageIndex)+2)
+	if len(fdstRec) >= 4 && string(fdstRec[:4]) == "FDST" {
+		// Good: 2 image records, then FDST
+		t.Log("SVG correctly filtered: 2 image records found")
+	} else {
+		// Check if there's a 3rd image record (SVG leaked through)
+		thirdImgRec := extractRecord(data, int(firstImageIndex)+2)
+		if len(thirdImgRec) > 0 {
+			fourthRec := extractRecord(data, int(firstImageIndex)+3)
+			if len(fourthRec) >= 4 && string(fourthRec[:4]) == "FDST" {
+				t.Fatal("SVG was not filtered: 3 image records found (expected 2)")
+			}
+		}
+	}
+}
+
 func TestPipeline_Convert_WithTestdataEPUB(t *testing.T) {
 	// Use the project's testdata/test.epub for an E2E test
 	epubPath := filepath.Join("..", "..", "testdata", "test.epub")

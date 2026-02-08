@@ -35,10 +35,7 @@ func NewAZW3Writer(cfg AZW3WriterConfig) (*AZW3Writer, error) {
 	if cfg.Compression == 0 {
 		cfg.Compression = CompressionNone
 	}
-	if cfg.Compression == CompressionPalmDoc {
-		return nil, fmt.Errorf("CompressionPalmDoc is not yet implemented")
-	}
-	if cfg.Compression != CompressionNone {
+	if cfg.Compression != CompressionNone && cfg.Compression != CompressionPalmDoc {
 		return nil, fmt.Errorf("unsupported compression type: %d", cfg.Compression)
 	}
 
@@ -51,8 +48,13 @@ func (w *AZW3Writer) WriteTo(out io.Writer) (int64, error) {
 
 	// --- Pass 1: Determine record numbers ---
 
-	// Select compressor (PalmDoc compressor will be added in a future phase)
-	var compressor Compressor = &NoCompression{}
+	// Select compressor based on compression type
+	var compressor Compressor
+	if cfg.Compression == CompressionPalmDoc {
+		compressor = &PalmDocCompressor{}
+	} else {
+		compressor = &NoCompression{}
+	}
 
 	// Split text into records
 	textRecords, err := SplitTextRecords(cfg.HTML, compressor)

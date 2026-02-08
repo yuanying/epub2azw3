@@ -153,9 +153,10 @@ func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata) error {
 	}
 
 	cfg := mobi.AZW3WriterConfig{
-		Title:    title,
-		HTML:     []byte(html),
-		Metadata: metadata,
+		Title:       title,
+		HTML:        []byte(html),
+		Metadata:    metadata,
+		Compression: mobi.CompressionPalmDoc,
 	}
 
 	writer, err := mobi.NewAZW3Writer(cfg)

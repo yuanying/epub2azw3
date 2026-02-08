@@ -67,14 +67,15 @@ func (h *HTMLBuilder) AddChapter(content *epub.Content) error {
 
 // AddCSS adds global CSS content to the builder (no namespacing)
 func (h *HTMLBuilder) AddCSS(css string) {
-	h.cssContent = append(h.cssContent, css)
+	h.cssContent = append(h.cssContent, TransformCSS(css))
 }
 
 // AddChapterCSS adds chapter-specific CSS with ID selector namespacing
 // ID selectors like #cover are transformed to #chapterID-cover
 // Only selectors outside {} blocks are transformed (not color codes inside property values)
 func (h *HTMLBuilder) AddChapterCSS(chapterID, css string) {
-	namespaced := namespaceIDSelectors(chapterID, css)
+	transformed := TransformCSS(css)
+	namespaced := namespaceIDSelectors(chapterID, transformed)
 	h.cssContent = append(h.cssContent, namespaced)
 }
 

@@ -568,7 +568,7 @@ func TestHTMLBuilder_AddChapterCSS(t *testing.T) {
 			name:      "class selector not transformed",
 			chapterID: "ch01",
 			css:       ".myclass { font-size: 12px }",
-			want:      ".myclass { font-size: 12px }",
+			want:      ".myclass { font-size: 0.75em }",
 		},
 		{
 			name:      "ID selector with class descendant",
@@ -650,8 +650,8 @@ func TestHTMLBuilder_AddCSS_GlobalCSS(t *testing.T) {
 		t.Fatalf("Failed to build HTML: %v", err)
 	}
 
-	// Global CSS should NOT be namespaced
-	if !strings.Contains(result, "#global { font-size: 14px }") {
+	// Global CSS should NOT be namespaced (px values are converted to em)
+	if !strings.Contains(result, "#global { font-size: 0.875em }") {
 		t.Errorf("Global CSS should not be namespaced. Result:\n%s", result)
 	}
 }

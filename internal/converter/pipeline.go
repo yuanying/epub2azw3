@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/PuerkitoBio/goquery"
 	"github.com/yuanying/epub2azw3/internal/epub"
 	"github.com/yuanying/epub2azw3/internal/mobi"
 )
@@ -35,12 +36,12 @@ func (p *Pipeline) Convert() error {
 	}
 	defer reader.Close()
 
-	html, err := p.buildHTML(reader, opf)
+	html, imageMapper, err := p.buildHTML(reader, opf)
 	if err != nil {
 		return err
 	}
 
-	return p.writeAZW3(html, &opf.Metadata)
+	return p.writeAZW3(html, &opf.Metadata, imageMapper)
 }
 
 // parseEPUB opens the EPUB file and parses the OPF.
@@ -67,7 +68,8 @@ func (p *Pipeline) parseEPUB() (*epub.EPUBReader, *epub.OPF, error) {
 }
 
 // buildHTML loads spine items and builds the integrated HTML.
-func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, error) {
+// It also collects images and transforms image references to kindle:embed format.
+func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *mobi.ImageMapper, error) {
 	builder := NewHTMLBuilder()
 	cssCache := make(map[string]string)
 	validChapters := 0
@@ -102,6 +104,16 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, er
 			continue
 		}
 
+		// Resolve img src attributes to absolute EPUB paths
+		// so they match manifest Href paths for image reference transformation
+		chapterDir := filepath.Dir(manifestItem.Href)
+		content.Document.Find("img[src]").Each(func(i int, s *goquery.Selection) {
+			if src, exists := s.Attr("src"); exists {
+				resolved := filepath.ToSlash(filepath.Clean(filepath.Join(chapterDir, src)))
+				s.SetAttr("src", resolved)
+			}
+		})
+
 		if err := builder.AddChapter(content); err != nil {
 			log.Printf("warning: failed to add chapter %q: %v, skipping", manifestItem.Href, err)
 			continue
@@ -119,7 +131,7 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, er
 	}
 
 	if validChapters == 0 {
-		return "", fmt.Errorf("no valid XHTML chapters found")
+		return "", nil, fmt.Errorf("no valid XHTML chapters found")
 	}
 
 	// Load and add CSS with chapter namespacing
@@ -137,16 +149,37 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, er
 		builder.AddChapterCSS(ref.chapterID, cssText)
 	}
 
-	html, err := builder.Build()
-	if err != nil {
-		return "", fmt.Errorf("failed to build HTML: %w", err)
+	// Collect images from manifest in document order
+	imageMapper := mobi.NewImageMapper()
+	for _, id := range opf.ManifestOrder {
+		item, ok := opf.Manifest[id]
+		if !ok {
+			continue
+		}
+		if !isImage(item.MediaType) {
+			continue
+		}
+		imgData, err := reader.ReadFile(item.Href)
+		if err != nil {
+			log.Printf("warning: failed to read image %q: %v, skipping", item.Href, err)
+			continue
+		}
+		imageMapper.AddImage(item.Href, imgData, item.MediaType)
 	}
 
-	return html, nil
+	html, err := builder.Build()
+	if err != nil {
+		return "", nil, fmt.Errorf("failed to build HTML: %w", err)
+	}
+
+	// Transform image references to kindle:embed format
+	html = mobi.TransformImageReferences(html, imageMapper)
+
+	return html, imageMapper, nil
 }
 
 // writeAZW3 creates the AZW3 file from the integrated HTML and metadata.
-func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata) error {
+func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper) error {
 	title := metadata.Title
 	if title == "" {
 		title = "Untitled"
@@ -157,6 +190,10 @@ func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata) error {
 		HTML:        []byte(html),
 		Metadata:    metadata,
 		Compression: mobi.CompressionPalmDoc,
+	}
+
+	if imageMapper != nil {
+		cfg.ImageRecords = imageMapper.ImageRecordData()
 	}
 
 	writer, err := mobi.NewAZW3Writer(cfg)
@@ -180,4 +217,13 @@ func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata) error {
 // isXHTML checks if a media type indicates an XHTML content file.
 func isXHTML(mediaType string) bool {
 	return strings.Contains(mediaType, "html") || strings.Contains(mediaType, "xhtml")
+}
+
+// isImage checks if a media type indicates a raster image file.
+// SVG (image/svg+xml) is excluded as Kindle does not support it.
+func isImage(mediaType string) bool {
+	if mediaType == "image/svg+xml" {
+		return false
+	}
+	return strings.HasPrefix(mediaType, "image/")
 }

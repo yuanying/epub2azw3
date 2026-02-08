@@ -118,16 +118,23 @@ func TestNewAZW3Writer_InvalidCompression(t *testing.T) {
 	}
 }
 
-func TestNewAZW3Writer_PalmDocNotImplemented(t *testing.T) {
+func TestNewAZW3Writer_PalmDocCompression(t *testing.T) {
 	html := generateTestHTML(100)
 	cfg := AZW3WriterConfig{
 		Title:       "Test Book",
 		HTML:        html,
 		Compression: CompressionPalmDoc,
 	}
-	_, err := NewAZW3Writer(cfg)
-	if err == nil {
-		t.Fatal("expected error for PalmDoc compression (not yet implemented)")
+	writer, err := NewAZW3Writer(cfg)
+	if err != nil {
+		t.Fatalf("NewAZW3Writer with PalmDoc: %v", err)
+	}
+	var buf bytes.Buffer
+	if _, err := writer.WriteTo(&buf); err != nil {
+		t.Fatalf("WriteTo with PalmDoc: %v", err)
+	}
+	if buf.Len() == 0 {
+		t.Fatal("WriteTo produced empty output")
 	}
 }
 

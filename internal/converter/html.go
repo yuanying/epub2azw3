@@ -222,6 +222,9 @@ func (h *HTMLBuilder) Build() (string, error) {
 
 	// Process each chapter
 	for _, chapter := range h.chapters {
+		// Transform HTML5 tags and remove forbidden attributes
+		TransformHTML(chapter.Document)
+
 		// Extract body content from the chapter
 		chapterBody := chapter.Document.Find("body")
 

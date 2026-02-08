@@ -14,6 +14,11 @@ EPUB フォーマットの電子書籍を Amazon Kindle 互換の AZW3（KF8）�
 | `internal/epub` | `models.go` | EPUB データ構造定義 |
 | `internal/converter` | `html.go` | HTML 統合（HTMLBuilder）、ID 名前空間化、リンク解決、CSS 統合 |
 | `internal/mobi` | `pdb.go` | PDB ヘッダー・レコードリスト生成 |
+| `internal/mobi` | `mobi_header.go` | MOBI ヘッダー生成 |
+| `internal/mobi` | `exth.go` | EXTH メタデータレコード生成 |
+| `internal/mobi` | `text_record.go` | テキストレコード分割（無圧縮） |
+| `internal/mobi` | `fixed_records.go` | FLIS/FCIS/EOF 固定レコード生成 |
+| `internal/mobi` | `fdst.go` | FDST フローデスクリプタ生成 |
 | `internal/util` | — | パス処理、エンコーディング、Palm エポック時刻変換 |
 
 ## パッケージ構造

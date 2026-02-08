@@ -154,6 +154,17 @@ func TestParseOPF_EPUB20(t *testing.T) {
 	if opf.NCXPath != "OEBPS/toc.ncx" {
 		t.Errorf("NCXPath = %q, want %q", opf.NCXPath, "OEBPS/toc.ncx")
 	}
+
+	// Test ManifestOrder preserves document order
+	if len(opf.ManifestOrder) != 5 {
+		t.Fatalf("ManifestOrder count = %d, want 5", len(opf.ManifestOrder))
+	}
+	expectedOrder := []string{"ncx", "cover-image", "chapter1", "chapter2", "stylesheet"}
+	for i, id := range expectedOrder {
+		if opf.ManifestOrder[i] != id {
+			t.Errorf("ManifestOrder[%d] = %q, want %q", i, opf.ManifestOrder[i], id)
+		}
+	}
 }
 
 func TestParseOPF_EPUB30(t *testing.T) {

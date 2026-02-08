@@ -32,6 +32,7 @@ var (
 	ErrMimetypeNotFound   = errors.New("mimetype file not found")
 	ErrContainerNotFound  = errors.New("META-INF/container.xml not found")
 	ErrOPFPathNotFound    = errors.New("OPF path not found in container.xml")
+	ErrFileNotFound       = errors.New("file not found")
 )
 
 // Open opens an EPUB file and validates its structure
@@ -87,7 +88,7 @@ func (r *EPUBReader) ReadFile(path string) ([]byte, error) {
 	path = normalizePath(path)
 	f, ok := r.files[path]
 	if !ok {
-		return nil, fmt.Errorf("file not found: %s", path)
+		return nil, fmt.Errorf("%w: %s", ErrFileNotFound, path)
 	}
 
 	rc, err := f.Open()

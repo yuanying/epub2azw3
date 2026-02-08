@@ -110,6 +110,7 @@ func ParseOPF(content []byte, opfDir string) (*OPF, error) {
 		}
 
 		opf.Manifest[item.ID] = manifestItem
+		opf.ManifestOrder = append(opf.ManifestOrder, item.ID)
 	}
 
 	// Parse spine

@@ -2,9 +2,13 @@ package main
 
 import (
 	"fmt"
+	"log"
 	"os"
+	"path/filepath"
+	"strings"
 
 	"github.com/spf13/cobra"
+	"github.com/yuanying/epub2azw3/internal/converter"
 )
 
 var rootCmd = &cobra.Command{
@@ -21,14 +25,22 @@ like Calibre.`,
 		outputPath, _ := cmd.Flags().GetString("output")
 
 		if outputPath == "" {
-			// Default output path: replace .epub with .azw3
-			outputPath = inputPath[:len(inputPath)-5] + ".azw3"
+			outputPath = strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + ".azw3"
 		}
 
-		fmt.Printf("Converting: %s -> %s\n", inputPath, outputPath)
+		log.Printf("Converting: %s -> %s", inputPath, outputPath)
 
-		// TODO: Implement conversion
-		return fmt.Errorf("conversion not yet implemented")
+		p := converter.NewPipeline(converter.ConvertOptions{
+			InputPath:  inputPath,
+			OutputPath: outputPath,
+		})
+
+		if err := p.Convert(); err != nil {
+			return fmt.Errorf("conversion failed: %w", err)
+		}
+
+		log.Printf("Done: %s", outputPath)
+		return nil
 	},
 }
 

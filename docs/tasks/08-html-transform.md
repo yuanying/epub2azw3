@@ -83,8 +83,8 @@ KindleデバイスはHTML5の一部タグを完全にはサポートしていな
 - contenteditable, draggable 等が削除されること
 
 ## 完了条件
-- [ ] HTML5タグ → Kindle互換タグ変換関数
-- [ ] 属性フィルタリング関数
-- [ ] AozoraEpub3互換要素の保持
-- [ ] HTMLBuilder パイプラインへの統合
-- [ ] 全テストがパス
+- [x] HTML5タグ → Kindle互換タグ変換関数
+- [x] 属性フィルタリング関数
+- [x] AozoraEpub3互換要素の保持
+- [x] HTMLBuilder パイプラインへの統合
+- [x] 全テストがパス

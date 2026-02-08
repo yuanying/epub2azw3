@@ -21,20 +21,34 @@ func readUint32BE(data []byte, offset int) uint32 {
 // extractRecord extracts record data from AZW3 binary at the given record index.
 // PDB record list starts at offset 78; each entry is 8 bytes (4 offset + 4 attrs).
 func extractRecord(data []byte, recordIndex int) []byte {
+	if len(data) < 78 {
+		return nil
+	}
+	totalRecords := int(readUint16BE(data, 76))
+	if recordIndex < 0 || recordIndex >= totalRecords {
+		return nil
+	}
+
 	listBase := 78
 	entryOffset := listBase + recordIndex*8
+	if entryOffset+4 > len(data) {
+		return nil
+	}
 	recOffset := int(readUint32BE(data, entryOffset))
 
 	// Determine end of record
 	var recEnd int
-	nextEntryOffset := listBase + (recordIndex+1)*8
-	if nextEntryOffset+4 <= len(data) {
+	if recordIndex+1 < totalRecords {
+		nextEntryOffset := listBase + (recordIndex+1)*8
+		if nextEntryOffset+4 > len(data) {
+			return nil
+		}
 		recEnd = int(readUint32BE(data, nextEntryOffset))
 	} else {
 		recEnd = len(data)
 	}
 
-	if recOffset >= len(data) || recEnd > len(data) {
+	if recOffset >= len(data) || recEnd > len(data) || recEnd < recOffset {
 		return nil
 	}
 	return data[recOffset:recEnd]

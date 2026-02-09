@@ -5,6 +5,7 @@ type OPF struct {
 	Metadata                 Metadata
 	Manifest                 map[string]ManifestItem // id -> item
 	ManifestOrder            []string                // manifest item IDs in document order
+	Guide                    []GuideReference
 	Spine                    []SpineItem
 	NCXPath                  string
 	PageProgressionDirection string // "rtl", "ltr", or "" (not specified)
@@ -43,4 +44,11 @@ type ManifestItem struct {
 type SpineItem struct {
 	IDRef  string
 	Linear bool
+}
+
+// GuideReference represents an OPF guide reference.
+type GuideReference struct {
+	Type  string
+	Title string
+	Href  string
 }

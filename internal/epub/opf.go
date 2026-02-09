@@ -18,6 +18,7 @@ type opfPackage struct {
 	Metadata opfMetadata `xml:"metadata"`
 	Manifest opfManifest `xml:"manifest"`
 	Spine    opfSpine    `xml:"spine"`
+	Guide    opfGuide    `xml:"guide"`
 }
 
 // opfMetadata represents the metadata section
@@ -86,6 +87,18 @@ type opfItemRef struct {
 	Linear string `xml:"linear,attr"`
 }
 
+// opfGuide represents the guide section (EPUB 2.0).
+type opfGuide struct {
+	References []opfGuideReference `xml:"reference"`
+}
+
+// opfGuideReference represents a reference in the OPF guide.
+type opfGuideReference struct {
+	Type  string `xml:"type,attr"`
+	Title string `xml:"title,attr"`
+	Href  string `xml:"href,attr"`
+}
+
 // ParseOPF parses an OPF file content and returns the OPF structure
 // opfDir is the directory containing the OPF file (e.g., "OEBPS/")
 func ParseOPF(content []byte, opfDir string) (*OPF, error) {
@@ -139,6 +152,15 @@ func ParseOPF(content []byte, opfDir string) (*OPF, error) {
 		if ncxItem, ok := opf.Manifest[pkg.Spine.Toc]; ok {
 			opf.NCXPath = ncxItem.Href
 		}
+	}
+
+	// Parse guide references
+	for _, ref := range pkg.Guide.References {
+		opf.Guide = append(opf.Guide, GuideReference{
+			Type:  ref.Type,
+			Title: ref.Title,
+			Href:  joinPathWithFragment(opfDir, ref.Href),
+		})
 	}
 
 	return opf, nil
@@ -304,6 +326,21 @@ func joinPath(base, rel string) string {
 		return rel
 	}
 	return filepath.ToSlash(filepath.Join(base, rel))
+}
+
+func joinPathWithFragment(base, rel string) string {
+	if rel == "" {
+		return ""
+	}
+	pathPart, frag, hasFrag := strings.Cut(rel, "#")
+	if pathPart == "" {
+		return rel
+	}
+	joined := joinPath(base, pathPart)
+	if hasFrag {
+		return joined + "#" + frag
+	}
+	return joined
 }
 
 // FindCoverImage finds the cover image in the manifest

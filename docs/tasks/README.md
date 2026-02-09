@@ -9,13 +9,14 @@ EPUB フォーマットの電子書籍を Amazon Kindle 互換の AZW3（KF8）�
 | パッケージ | ファイル | 機能 |
 |-----------|---------|------|
 | `internal/epub` | `reader.go` | EPUB ZIP アーカイブの読み込み |
-| `internal/epub` | `opf.go` | OPF パース（メタデータ、マニフェスト、スパイン、NCXパス、page-progression-direction） |
+| `internal/epub` | `opf.go` | OPF パース（メタデータ、マニフェスト、guide、スパイン、NCXパス、page-progression-direction） |
 | `internal/epub` | `content.go` | XHTML/CSS 読み込み、body/html 属性抽出 |
 | `internal/epub` | `models.go` | EPUB データ構造定義 |
 | `internal/converter` | `html.go` | HTML 統合（HTMLBuilder）、ID 名前空間化、リンク解決、CSS 統合 |
+| `internal/converter` | `cover.go` | カバー画像検出（優先順位付き）と EXTH 131 オフセット計算 |
 | `internal/mobi` | `pdb.go` | PDB ヘッダー・レコードリスト生成 |
 | `internal/mobi` | `mobi_header.go` | MOBI ヘッダー生成 |
-| `internal/mobi` | `exth.go` | EXTH メタデータレコード生成 |
+| `internal/mobi` | `exth.go` | EXTH メタデータレコード生成（カバーオフセット type 131 含む） |
 | `internal/mobi` | `text_record.go` | テキストレコード分割（無圧縮） |
 | `internal/mobi` | `fixed_records.go` | FLIS/FCIS/EOF 固定レコード生成 |
 | `internal/mobi` | `fdst.go` | FDST フローデスクリプタ生成 |

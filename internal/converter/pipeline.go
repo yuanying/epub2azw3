@@ -41,7 +41,18 @@ func (p *Pipeline) Convert() error {
 		return err
 	}
 
-	return p.writeAZW3(html, &opf.Metadata, imageMapper)
+	cover := DetectCoverInfo(opf, reader)
+	var coverOffset *uint32
+	if cover == nil {
+		log.Printf("warning: cover image not found")
+	} else if offset, ok := ComputeCoverOffset(cover, imageMapper); ok {
+		coverOffset = &offset
+	} else {
+		log.Printf("warning: cover image detected (%s) but not found in image records: %s",
+			cover.DetectionMethod, cover.Href)
+	}
+
+	return p.writeAZW3(html, &opf.Metadata, imageMapper, coverOffset)
 }
 
 // parseEPUB opens the EPUB file and parses the OPF.
@@ -179,7 +190,12 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *m
 }
 
 // writeAZW3 creates the AZW3 file from the integrated HTML and metadata.
-func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper) error {
+func (p *Pipeline) writeAZW3(
+	html string,
+	metadata *epub.Metadata,
+	imageMapper *mobi.ImageMapper,
+	coverOffset *uint32,
+) error {
 	title := metadata.Title
 	if title == "" {
 		title = "Untitled"
@@ -190,6 +206,7 @@ func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *
 		HTML:        []byte(html),
 		Metadata:    metadata,
 		Compression: mobi.CompressionPalmDoc,
+		CoverOffset: coverOffset,
 	}
 
 	if imageMapper != nil {

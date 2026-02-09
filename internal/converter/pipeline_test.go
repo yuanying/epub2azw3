@@ -54,6 +54,34 @@ func extractRecord(data []byte, recordIndex int) []byte {
 	return data[recOffset:recEnd]
 }
 
+func findEXTHUint32(rec0 []byte, recordType uint32) (uint32, bool) {
+	exthStart := 16 + 248 // PalmDOC header + MOBI header
+	if len(rec0) < exthStart+12 {
+		return 0, false
+	}
+	if string(rec0[exthStart:exthStart+4]) != "EXTH" {
+		return 0, false
+	}
+
+	recordCount := int(readUint32BE(rec0, exthStart+8))
+	offset := exthStart + 12
+	for i := 0; i < recordCount; i++ {
+		if offset+12 > len(rec0) {
+			return 0, false
+		}
+		recType := readUint32BE(rec0, offset)
+		recLen := int(readUint32BE(rec0, offset+4))
+		if recLen < 8 || offset+recLen > len(rec0) {
+			return 0, false
+		}
+		if recType == recordType {
+			return readUint32BE(rec0, offset+8), true
+		}
+		offset += recLen
+	}
+	return 0, false
+}
+
 // createMinimalTestEPUB creates a minimal valid EPUB ZIP file in the given directory.
 // Returns the path to the created EPUB file.
 func createMinimalTestEPUB(t *testing.T, dir string) string {
@@ -601,6 +629,36 @@ func TestPipeline_Convert_ImageRecords(t *testing.T) {
 		firstImageIndex, len(imgRec1), len(imgRec2))
 }
 
+func TestPipeline_Convert_CoverEXTHOffsetPresent(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createImageTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+	})
+
+	if err := p.Convert(); err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+	rec0 := extractRecord(data, 0)
+
+	coverOffset, ok := findEXTHUint32(rec0, 131)
+	if !ok {
+		t.Fatal("EXTH type 131 not found")
+	}
+	// cover.jpg is the first image in manifest order for createImageTestEPUB.
+	if coverOffset != 0 {
+		t.Errorf("cover offset = %d, want 0", coverOffset)
+	}
+}
+
 func TestPipeline_Convert_SVGFiltered(t *testing.T) {
 	dir := t.TempDir()
 	epubPath := createImageTestEPUB(t, dir)
@@ -694,5 +752,30 @@ func TestPipeline_Convert_WithTestdataEPUB(t *testing.T) {
 	rec1 := extractRecord(data, 1)
 	if len(rec1) == 0 {
 		t.Error("text record (record 1) is empty")
+	}
+}
+
+func TestPipeline_Convert_CoverEXTHOffsetAbsent(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createMinimalTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+	})
+
+	if err := p.Convert(); err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+	rec0 := extractRecord(data, 0)
+
+	if _, ok := findEXTHUint32(rec0, 131); ok {
+		t.Fatal("EXTH type 131 should not exist when no cover is detected")
 	}
 }

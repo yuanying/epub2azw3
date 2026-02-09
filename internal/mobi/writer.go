@@ -15,6 +15,7 @@ type AZW3WriterConfig struct {
 	HTML         []byte
 	Metadata     *epub.Metadata
 	ImageRecords [][]byte
+	CoverOffset  *uint32
 	NCXRecord    []byte
 	Compression  uint16
 	CreationTime time.Time
@@ -103,6 +104,9 @@ func (w *AZW3Writer) WriteTo(out io.Writer) (int64, error) {
 		exth = EXTHFromMetadata(*cfg.Metadata, 0, totalRecordCount)
 	} else {
 		exth = NewEXTHHeader(0, totalRecordCount)
+	}
+	if cfg.CoverOffset != nil {
+		exth.AddUint32Record(131, *cfg.CoverOffset)
 	}
 
 	exthData, err := exth.Bytes()

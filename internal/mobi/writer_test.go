@@ -403,6 +403,78 @@ func TestWriteTo_EXTHValues(t *testing.T) {
 	}
 }
 
+func TestWriteTo_EXTHCoverOffsetPresent(t *testing.T) {
+	html := generateTestHTML(100)
+	uid := uint32(12345)
+	creation := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	coverOffset := uint32(3)
+	cfg := AZW3WriterConfig{
+		Title:        "Test Book",
+		HTML:         html,
+		UniqueID:     &uid,
+		CreationTime: creation,
+		CoverOffset:  &coverOffset,
+	}
+	w, err := NewAZW3Writer(cfg)
+	if err != nil {
+		t.Fatalf("NewAZW3Writer failed: %v", err)
+	}
+	data := writeToBuffer(t, w)
+
+	rec0 := extractRecord(data, 0)
+	exthStart := 16 + MOBIHeaderSize
+	exthRecordCount := readUint32BE(rec0, exthStart+8)
+	offset := exthStart + 12
+
+	foundCover := false
+	for i := 0; i < int(exthRecordCount); i++ {
+		recType := readUint32BE(rec0, offset)
+		recLen := readUint32BE(rec0, offset+4)
+		if recType == 131 {
+			val := readUint32BE(rec0, offset+8)
+			if val != coverOffset {
+				t.Errorf("EXTH 131 (cover offset): got %d, want %d", val, coverOffset)
+			}
+			foundCover = true
+		}
+		offset += int(recLen)
+	}
+	if !foundCover {
+		t.Fatal("EXTH type 131 (cover offset) not found")
+	}
+}
+
+func TestWriteTo_EXTHCoverOffsetAbsent(t *testing.T) {
+	html := generateTestHTML(100)
+	uid := uint32(12345)
+	creation := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+	cfg := AZW3WriterConfig{
+		Title:        "Test Book",
+		HTML:         html,
+		UniqueID:     &uid,
+		CreationTime: creation,
+	}
+	w, err := NewAZW3Writer(cfg)
+	if err != nil {
+		t.Fatalf("NewAZW3Writer failed: %v", err)
+	}
+	data := writeToBuffer(t, w)
+
+	rec0 := extractRecord(data, 0)
+	exthStart := 16 + MOBIHeaderSize
+	exthRecordCount := readUint32BE(rec0, exthStart+8)
+	offset := exthStart + 12
+
+	for i := 0; i < int(exthRecordCount); i++ {
+		recType := readUint32BE(rec0, offset)
+		recLen := readUint32BE(rec0, offset+4)
+		if recType == 131 {
+			t.Fatal("EXTH type 131 should not exist when CoverOffset is nil")
+		}
+		offset += int(recLen)
+	}
+}
+
 // --- Step 6: Record data content verification ---
 
 func TestWriteTo_TextRecordContent(t *testing.T) {

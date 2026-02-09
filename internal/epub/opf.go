@@ -18,6 +18,7 @@ type opfPackage struct {
 	Metadata opfMetadata `xml:"metadata"`
 	Manifest opfManifest `xml:"manifest"`
 	Spine    opfSpine    `xml:"spine"`
+	Guide    opfGuide    `xml:"guide"`
 }
 
 // opfMetadata represents the metadata section
@@ -86,6 +87,18 @@ type opfItemRef struct {
 	Linear string `xml:"linear,attr"`
 }
 
+// opfGuide represents the guide section (EPUB 2.0).
+type opfGuide struct {
+	References []opfGuideReference `xml:"reference"`
+}
+
+// opfGuideReference represents a reference in the OPF guide.
+type opfGuideReference struct {
+	Type  string `xml:"type,attr"`
+	Title string `xml:"title,attr"`
+	Href  string `xml:"href,attr"`
+}
+
 // ParseOPF parses an OPF file content and returns the OPF structure
 // opfDir is the directory containing the OPF file (e.g., "OEBPS/")
 func ParseOPF(content []byte, opfDir string) (*OPF, error) {
@@ -139,6 +152,15 @@ func ParseOPF(content []byte, opfDir string) (*OPF, error) {
 		if ncxItem, ok := opf.Manifest[pkg.Spine.Toc]; ok {
 			opf.NCXPath = ncxItem.Href
 		}
+	}
+
+	// Parse guide references
+	for _, ref := range pkg.Guide.References {
+		opf.Guide = append(opf.Guide, GuideReference{
+			Type:  ref.Type,
+			Title: ref.Title,
+			Href:  joinPathWithFragment(opfDir, ref.Href),
+		})
 	}
 
 	return opf, nil
@@ -306,12 +328,37 @@ func joinPath(base, rel string) string {
 	return filepath.ToSlash(filepath.Join(base, rel))
 }
 
-// FindCoverImage finds the cover image in the manifest
+func joinPathWithFragment(base, rel string) string {
+	if rel == "" {
+		return ""
+	}
+	pathPart, frag, hasFrag := strings.Cut(rel, "#")
+	if pathPart == "" {
+		return rel
+	}
+	joined := joinPath(base, pathPart)
+	if hasFrag {
+		return joined + "#" + frag
+	}
+	return joined
+}
+
+// FindCoverImage finds a cover image using OPF-only lightweight detection.
+// It does not parse XHTML files; that richer detection lives in converter layer.
 func (opf *OPF) FindCoverImage() (string, bool) {
+	if opf == nil {
+		return "", false
+	}
+
+	orderedItems := orderedManifestItems(opf)
+
 	// Method 1: EPUB 3.0 - check for cover-image property
-	for _, item := range opf.Manifest {
+	for _, item := range orderedItems {
+		if !isImageMediaType(item.MediaType) {
+			continue
+		}
 		for _, prop := range item.Properties {
-			if prop == "cover-image" {
+			if strings.EqualFold(prop, "cover-image") {
 				return item.Href, true
 			}
 		}
@@ -319,10 +366,74 @@ func (opf *OPF) FindCoverImage() (string, bool) {
 
 	// Method 2: EPUB 2.0 - check for meta name="cover"
 	if opf.Metadata.CoverID != "" {
-		if item, ok := opf.Manifest[opf.Metadata.CoverID]; ok {
+		if item, ok := opf.Manifest[opf.Metadata.CoverID]; ok && isImageMediaType(item.MediaType) {
+			return item.Href, true
+		}
+	}
+
+	// Method 3: guide type="cover" -> matching image manifest item (ignore fragment)
+	for _, ref := range opf.Guide {
+		if !strings.EqualFold(ref.Type, "cover") {
+			continue
+		}
+		guideHref := stripFragment(ref.Href)
+		if guideHref == "" {
+			continue
+		}
+		for _, item := range orderedItems {
+			if !isImageMediaType(item.MediaType) {
+				continue
+			}
+			if stripFragment(item.Href) == guideHref {
+				return item.Href, true
+			}
+		}
+	}
+
+	// Method 4: filename pattern (contains "cover", case-insensitive, SVG excluded)
+	for _, item := range orderedItems {
+		if !isImageMediaType(item.MediaType) {
+			continue
+		}
+		if strings.Contains(strings.ToLower(filepath.Base(item.Href)), "cover") {
 			return item.Href, true
 		}
 	}
 
 	return "", false
+}
+
+func orderedManifestItems(opf *OPF) []ManifestItem {
+	seen := make(map[string]struct{}, len(opf.Manifest))
+	items := make([]ManifestItem, 0, len(opf.Manifest))
+
+	for _, id := range opf.ManifestOrder {
+		item, ok := opf.Manifest[id]
+		if !ok {
+			continue
+		}
+		items = append(items, item)
+		seen[id] = struct{}{}
+	}
+
+	for id, item := range opf.Manifest {
+		if _, ok := seen[id]; ok {
+			continue
+		}
+		items = append(items, item)
+	}
+
+	return items
+}
+
+func stripFragment(href string) string {
+	pathPart, _, _ := strings.Cut(href, "#")
+	return pathPart
+}
+
+func isImageMediaType(mediaType string) bool {
+	if mediaType == "image/svg+xml" {
+		return false
+	}
+	return strings.HasPrefix(mediaType, "image/")
 }

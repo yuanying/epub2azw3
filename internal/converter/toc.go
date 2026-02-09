@@ -71,6 +71,9 @@ func (g *TOCGenerator) writeInlineTOCEntries(b *strings.Builder, points []epub.N
 
 // normalizePath cleans and slash-normalizes a path for consistent map lookups.
 func normalizePath(p string) string {
+	if strings.TrimSpace(p) == "" {
+		return ""
+	}
 	return filepath.ToSlash(filepath.Clean(p))
 }
 

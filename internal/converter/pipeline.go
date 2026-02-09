@@ -42,6 +42,17 @@ func (p *Pipeline) Convert() error {
 		return err
 	}
 
+	cover := DetectCoverInfo(opf, reader)
+	var coverOffset *uint32
+	if cover == nil {
+		log.Printf("warning: cover image not found")
+	} else if offset, ok := ComputeCoverOffset(cover, imageMapper); ok {
+		coverOffset = &offset
+	} else {
+		log.Printf("warning: cover image detected (%s) but not found in image records: %s",
+			cover.DetectionMethod, cover.Href)
+	}
+
 	// Load NCX for TOC generation
 	ncx, err := epub.LoadNCX(reader, opf)
 	if err != nil {
@@ -75,7 +86,7 @@ func (p *Pipeline) Convert() error {
 		}
 	}
 
-	return p.writeAZW3(html, &opf.Metadata, imageMapper, ncxRecord)
+	return p.writeAZW3(html, &opf.Metadata, imageMapper, ncxRecord, coverOffset)
 }
 
 // parseEPUB opens the EPUB file and parses the OPF.
@@ -210,7 +221,7 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *m
 }
 
 // writeAZW3 creates the AZW3 file from the integrated HTML and metadata.
-func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper, ncxRecord []byte) error {
+func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper, ncxRecord []byte, coverOffset *uint32) error {
 	title := metadata.Title
 	if title == "" {
 		title = "Untitled"
@@ -222,6 +233,7 @@ func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *
 		Metadata:    metadata,
 		NCXRecord:   ncxRecord,
 		Compression: mobi.CompressionPalmDoc,
+		CoverOffset: coverOffset,
 	}
 
 	if imageMapper != nil {

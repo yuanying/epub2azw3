@@ -403,6 +403,46 @@ func TestParseOPF_IdentifierFallsBackToUniqueIDWithoutISBN(t *testing.T) {
 	}
 }
 
+func TestParseOPF_GuideReferences(t *testing.T) {
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Guide Test</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">guide-001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="cover-page" href="text/cover.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="cover-page"/>
+  </spine>
+  <guide>
+    <reference type="cover" title="Cover" href="text/cover.xhtml#top"/>
+    <reference type="toc" title="Table of Contents" href="toc.xhtml"/>
+  </guide>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "OEBPS")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	if len(opf.Guide) != 2 {
+		t.Fatalf("Guide count = %d, want 2", len(opf.Guide))
+	}
+
+	if opf.Guide[0].Type != "cover" {
+		t.Errorf("Guide[0].Type = %q, want %q", opf.Guide[0].Type, "cover")
+	}
+	if opf.Guide[0].Href != "OEBPS/text/cover.xhtml#top" {
+		t.Errorf("Guide[0].Href = %q, want %q", opf.Guide[0].Href, "OEBPS/text/cover.xhtml#top")
+	}
+	if opf.Guide[1].Href != "OEBPS/toc.xhtml" {
+		t.Errorf("Guide[1].Href = %q, want %q", opf.Guide[1].Href, "OEBPS/toc.xhtml")
+	}
+}
+
 func TestJoinPath_SlashNormalization(t *testing.T) {
 	tests := []struct {
 		name string
@@ -468,6 +508,7 @@ func TestFindCoverImage(t *testing.T) {
 						Properties: []string{"cover-image"},
 					},
 				},
+				ManifestOrder: []string{"cover"},
 			},
 			wantHref: "images/cover.jpg",
 			wantOK:   true,
@@ -485,9 +526,121 @@ func TestFindCoverImage(t *testing.T) {
 						MediaType: "image/jpeg",
 					},
 				},
+				ManifestOrder: []string{"cover-image"},
 			},
 			wantHref: "OEBPS/images/cover.jpg",
 			wantOK:   true,
+		},
+		{
+			name: "properties takes priority over meta",
+			opf: &OPF{
+				Metadata: Metadata{
+					CoverID: "meta-cover",
+				},
+				Manifest: map[string]ManifestItem{
+					"prop-cover": {
+						ID:         "prop-cover",
+						Href:       "images/prop-cover.jpg",
+						MediaType:  "image/jpeg",
+						Properties: []string{"cover-image"},
+					},
+					"meta-cover": {
+						ID:        "meta-cover",
+						Href:      "images/meta-cover.jpg",
+						MediaType: "image/jpeg",
+					},
+				},
+				ManifestOrder: []string{"prop-cover", "meta-cover"},
+			},
+			wantHref: "images/prop-cover.jpg",
+			wantOK:   true,
+		},
+		{
+			name: "meta takes priority over guide",
+			opf: &OPF{
+				Metadata: Metadata{
+					CoverID: "meta-cover",
+				},
+				Manifest: map[string]ManifestItem{
+					"meta-cover": {
+						ID:        "meta-cover",
+						Href:      "images/meta-cover.jpg",
+						MediaType: "image/jpeg",
+					},
+					"guide-cover": {
+						ID:        "guide-cover",
+						Href:      "images/guide-cover.jpg",
+						MediaType: "image/jpeg",
+					},
+				},
+				ManifestOrder: []string{"meta-cover", "guide-cover"},
+				Guide: []GuideReference{
+					{Type: "cover", Href: "images/guide-cover.jpg"},
+				},
+			},
+			wantHref: "images/meta-cover.jpg",
+			wantOK:   true,
+		},
+		{
+			name: "guide cover with fragment resolves to image",
+			opf: &OPF{
+				Manifest: map[string]ManifestItem{
+					"cover-image": {
+						ID:        "cover-image",
+						Href:      "OEBPS/images/cover.jpg",
+						MediaType: "image/jpeg",
+					},
+					"cover-page": {
+						ID:        "cover-page",
+						Href:      "OEBPS/text/cover.xhtml",
+						MediaType: "application/xhtml+xml",
+					},
+				},
+				ManifestOrder: []string{"cover-image", "cover-page"},
+				Guide: []GuideReference{
+					{Type: "cover", Href: "OEBPS/images/cover.jpg#top"},
+				},
+			},
+			wantHref: "OEBPS/images/cover.jpg",
+			wantOK:   true,
+		},
+		{
+			name: "guide non-image falls back to filename",
+			opf: &OPF{
+				Manifest: map[string]ManifestItem{
+					"cover-page": {
+						ID:        "cover-page",
+						Href:      "OEBPS/text/cover.xhtml",
+						MediaType: "application/xhtml+xml",
+					},
+					"filename-cover": {
+						ID:        "filename-cover",
+						Href:      "OEBPS/images/Cover.jpeg",
+						MediaType: "image/jpeg",
+					},
+				},
+				ManifestOrder: []string{"cover-page", "filename-cover"},
+				Guide: []GuideReference{
+					{Type: "cover", Href: "OEBPS/text/cover.xhtml"},
+				},
+			},
+			wantHref: "OEBPS/images/Cover.jpeg",
+			wantOK:   true,
+		},
+		{
+			name: "filename detection excludes SVG",
+			opf: &OPF{
+				Manifest: map[string]ManifestItem{
+					"svg-cover": {
+						ID:        "svg-cover",
+						Href:      "images/cover.svg",
+						MediaType: "image/svg+xml",
+					},
+				},
+				ManifestOrder: []string{"svg-cover"},
+			},
+			wantHref: "",
+			wantOK:   false,
 		},
 		{
 			name: "no cover image",
@@ -499,6 +652,7 @@ func TestFindCoverImage(t *testing.T) {
 						MediaType: "application/xhtml+xml",
 					},
 				},
+				ManifestOrder: []string{"chapter"},
 			},
 			wantHref: "",
 			wantOK:   false,

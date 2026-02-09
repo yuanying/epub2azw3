@@ -5,11 +5,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"regexp"
 	"strings"
 	"time"
 
 	"github.com/yuanying/epub2azw3/internal/epub"
 )
+
+var isbnPattern = regexp.MustCompile(`(?:^|\D)(\d{13}|\d{10})(?:\D|$)`)
 
 // EXTHRecord represents a single EXTH metadata record.
 type EXTHRecord struct {
@@ -152,9 +155,9 @@ func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *E
 		h.AddStringRecord(103, meta.Description)
 	}
 
-	// Identifier → type 104
-	if meta.Identifier != "" {
-		h.AddStringRecord(104, meta.Identifier)
+	// Identifier → type 104 (ISBN extracted)
+	if isbn, ok := extractISBN(meta.Identifier); ok {
+		h.AddStringRecord(104, isbn)
 	}
 
 	// Subjects → type 105 (each Subject)
@@ -202,6 +205,17 @@ func joinAuthors(creators []epub.Creator) string {
 		authors = append(authors, name)
 	}
 	return strings.Join(authors, " & ")
+}
+
+// extractISBN extracts an ISBN-10 or ISBN-13 from the given identifier string.
+// Hyphens are removed before matching. Returns the extracted ISBN and true if found.
+func extractISBN(identifier string) (string, bool) {
+	stripped := strings.ReplaceAll(identifier, "-", "")
+	m := isbnPattern.FindStringSubmatch(stripped)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
 }
 
 // normalizeDate converts ISO 8601 date strings to "YYYY-MM-DD" format.

@@ -247,7 +247,7 @@ func TestEXTHFromMetadata_AllFields(t *testing.T) {
 		100: {"Author One & Author Two"},
 		101: {"Test Publisher"},
 		103: {"A test book description"},
-		104: {"978-4-12345678-0"},
+		104: {"9784123456780"},
 		105: {"Fiction", "Science"},
 		106: {"2024-01-01"},
 		109: {"Copyright 2024"},
@@ -473,6 +473,76 @@ func TestNormalizeDate(t *testing.T) {
 			got := normalizeDate(tt.input)
 			if got != tt.want {
 				t.Errorf("normalizeDate(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractISBN(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{"ISBN-13 bare", "9784123456780", "9784123456780", true},
+		{"ISBN-10 bare", "4123456780", "4123456780", true},
+		{"ISBN-13 with hyphens", "978-4-12345678-0", "9784123456780", true},
+		{"urn:isbn prefix", "urn:isbn:9784123456780", "9784123456780", true},
+		{"urn:isbn with hyphens", "urn:isbn:978-4-12345678-0", "9784123456780", true},
+		{"ISBN embedded in text", "abc 9784123456780 def", "9784123456780", true},
+		{"UUID should not match", "urn:uuid:12345678-1234-1234-1234-123456789012", "", false},
+		{"empty string", "", "", false},
+		{"short number", "12345", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := extractISBN(tt.input)
+			if ok != tt.ok {
+				t.Errorf("extractISBN(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Errorf("extractISBN(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_ISBNExtraction(t *testing.T) {
+	tests := []struct {
+		name       string
+		identifier string
+		want       []string // expected type 104 values; nil means no record
+	}{
+		{"ISBN-13 extracted", "978-4-12345678-0", []string{"9784123456780"}},
+		{"urn:isbn extracted", "urn:isbn:9784123456780", []string{"9784123456780"}},
+		{"UUID produces no record", "urn:uuid:12345678-1234-1234-1234-123456789012", nil},
+		{"empty produces no record", "", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Identifier: tt.identifier}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if tt.want == nil {
+				if len(records[104]) != 0 {
+					t.Errorf("type 104 records = %v, want none", records[104])
+				}
+			} else {
+				if len(records[104]) != len(tt.want) {
+					t.Fatalf("type 104 count = %d, want %d", len(records[104]), len(tt.want))
+				}
+				for i, v := range tt.want {
+					if records[104][i] != v {
+						t.Errorf("type 104[%d] = %q, want %q", i, records[104][i], v)
+					}
+				}
 			}
 		})
 	}

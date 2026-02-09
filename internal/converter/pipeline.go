@@ -1,6 +1,7 @@
 package converter
 
 import (
+	"bytes"
 	"fmt"
 	"log"
 	"os"
@@ -36,7 +37,7 @@ func (p *Pipeline) Convert() error {
 	}
 	defer reader.Close()
 
-	html, imageMapper, err := p.buildHTML(reader, opf)
+	html, imageMapper, builder, err := p.buildHTML(reader, opf)
 	if err != nil {
 		return err
 	}
@@ -52,7 +53,40 @@ func (p *Pipeline) Convert() error {
 			cover.DetectionMethod, cover.Href)
 	}
 
-	return p.writeAZW3(html, &opf.Metadata, imageMapper, coverOffset)
+	// Load NCX for TOC generation
+	ncx, err := epub.LoadNCX(reader, opf)
+	if err != nil {
+		log.Printf("warning: failed to load NCX: %v", err)
+	}
+
+	// Generate inline TOC and insert into HTML (before image reference transformation)
+	var tocGen *TOCGenerator
+	if ncx != nil && len(ncx.NavPoints) > 0 {
+		tocGen = NewTOCGenerator(ncx, builder.GetChapterIDs())
+		html = tocGen.InsertInlineTOC(html)
+	}
+
+	// Transform image references to kindle:embed format
+	html = mobi.TransformImageReferences(html, imageMapper)
+
+	// Build NCX record
+	var ncxRecord []byte
+	if tocGen != nil {
+		finalHTML := []byte(html)
+		entries, err := tocGen.BuildTOCEntries(finalHTML)
+		if err != nil {
+			log.Printf("warning: failed to build TOC entries: %v", err)
+		} else if len(entries) > 0 {
+			ncxEntries := convertTOCEntries(entries)
+			ncxRecord = mobi.GenerateNCXRecord(mobi.NCXRecordConfig{
+				Title:   opf.Metadata.Title,
+				Entries: ncxEntries,
+				Guide:   buildGuideReferences(finalHTML),
+			})
+		}
+	}
+
+	return p.writeAZW3(html, &opf.Metadata, imageMapper, ncxRecord, coverOffset)
 }
 
 // parseEPUB opens the EPUB file and parses the OPF.
@@ -79,8 +113,8 @@ func (p *Pipeline) parseEPUB() (*epub.EPUBReader, *epub.OPF, error) {
 }
 
 // buildHTML loads spine items and builds the integrated HTML.
-// It also collects images and transforms image references to kindle:embed format.
-func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *mobi.ImageMapper, error) {
+// It also collects images referenced in the content.
+func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *mobi.ImageMapper, *HTMLBuilder, error) {
 	builder := NewHTMLBuilder()
 	cssCache := make(map[string]string)
 	validChapters := 0
@@ -142,7 +176,7 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *m
 	}
 
 	if validChapters == 0 {
-		return "", nil, fmt.Errorf("no valid XHTML chapters found")
+		return "", nil, nil, fmt.Errorf("no valid XHTML chapters found")
 	}
 
 	// Load and add CSS with chapter namespacing
@@ -180,22 +214,14 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *m
 
 	html, err := builder.Build()
 	if err != nil {
-		return "", nil, fmt.Errorf("failed to build HTML: %w", err)
+		return "", nil, nil, fmt.Errorf("failed to build HTML: %w", err)
 	}
 
-	// Transform image references to kindle:embed format
-	html = mobi.TransformImageReferences(html, imageMapper)
-
-	return html, imageMapper, nil
+	return html, imageMapper, builder, nil
 }
 
 // writeAZW3 creates the AZW3 file from the integrated HTML and metadata.
-func (p *Pipeline) writeAZW3(
-	html string,
-	metadata *epub.Metadata,
-	imageMapper *mobi.ImageMapper,
-	coverOffset *uint32,
-) error {
+func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper, ncxRecord []byte, coverOffset *uint32) error {
 	title := metadata.Title
 	if title == "" {
 		title = "Untitled"
@@ -205,6 +231,7 @@ func (p *Pipeline) writeAZW3(
 		Title:       title,
 		HTML:        []byte(html),
 		Metadata:    metadata,
+		NCXRecord:   ncxRecord,
 		Compression: mobi.CompressionPalmDoc,
 		CoverOffset: coverOffset,
 	}
@@ -229,6 +256,42 @@ func (p *Pipeline) writeAZW3(
 	}
 
 	return nil
+}
+
+// convertTOCEntries converts converter.TOCEntry slice to mobi.NCXEntry slice.
+func convertTOCEntries(entries []TOCEntry) []mobi.NCXEntry {
+	result := make([]mobi.NCXEntry, len(entries))
+	for i, e := range entries {
+		result[i] = mobi.NCXEntry{
+			Label:    e.Label,
+			FilePos:  e.FilePos,
+			Children: convertTOCEntries(e.Children),
+		}
+	}
+	return result
+}
+
+// buildGuideReferences creates guide references for the NCX record.
+// It includes a "toc" reference if an inline TOC div exists in the HTML.
+func buildGuideReferences(finalHTML []byte) []mobi.GuideReference {
+	var refs []mobi.GuideReference
+
+	// Find the inline TOC position
+	tocPattern := []byte(`id="toc"`)
+	if idx := bytes.Index(finalHTML, tocPattern); idx >= 0 {
+		// Walk backwards to find the '<' that opens this tag
+		tagStart := idx
+		for tagStart > 0 && finalHTML[tagStart] != '<' {
+			tagStart--
+		}
+		refs = append(refs, mobi.GuideReference{
+			Type:    "toc",
+			Title:   "Table of Contents",
+			FilePos: uint32(tagStart),
+		})
+	}
+
+	return refs
 }
 
 // isXHTML checks if a media type indicates an XHTML content file.

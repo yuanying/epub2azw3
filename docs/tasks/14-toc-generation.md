@@ -59,12 +59,11 @@ Kindleの目次は、HTML形式で記述されたNCXレコードとして格納�
 ### ナビゲーションポイント（`<guide>` セクション）
 ```html
 <guide>
-  <reference type="toc" title="目次" href="#toc"/>
-  <reference type="text" title="本文開始" href="#start"/>
-  <reference type="cover" title="表紙" href="#cover"/>
+  <reference type="toc" title="Table of Contents" filepos="00000XXX"/>
 </guide>
 ```
 - **NCXレコードHTMLの `<head>` に配置**
+- `filepos` はインラインTOC div の開始位置のバイトオフセット
 
 ## データ構造
 
@@ -96,9 +95,9 @@ Kindleの目次は、HTML形式で記述されたNCXレコードとして格納�
 - 空の目次の処理
 
 ## 完了条件
-- [ ] filepos計算関数
-- [ ] NCXレコードHTML生成関数
-- [ ] HTML目次（本文内）生成関数
-- [ ] `<guide>` セクション生成
-- [ ] NavPoint → TOCEntry変換
-- [ ] 全テストがパス
+- [x] filepos計算関数
+- [x] NCXレコードHTML生成関数
+- [x] HTML目次（本文内）生成関数
+- [x] `<guide>` セクション生成
+- [x] NavPoint → TOCEntry変換
+- [x] 全テストがパス

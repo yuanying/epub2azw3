@@ -834,6 +834,138 @@ func TestWriteTo_WithImageRecords(t *testing.T) {
 	}
 }
 
+// --- Step 10: NCX record ---
+
+func TestWriteTo_WithNCXRecord(t *testing.T) {
+	html := generateTestHTML(100)
+	uid := uint32(12345)
+	creation := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	ncxData := []byte("<html><body><h1>TOC</h1></body></html>")
+
+	cfg := AZW3WriterConfig{
+		Title:        "Test Book",
+		HTML:         html,
+		UniqueID:     &uid,
+		CreationTime: creation,
+		NCXRecord:    ncxData,
+	}
+	w, err := NewAZW3Writer(cfg)
+	if err != nil {
+		t.Fatalf("NewAZW3Writer failed: %v", err)
+	}
+	data := writeToBuffer(t, w)
+
+	// Record count: Record0 + text×1 + NCX + FDST + FLIS + FCIS + EOF = 7
+	numRecords := readUint16BE(data, 76)
+	if numRecords != 7 {
+		t.Errorf("record count: got %d, want 7", numRecords)
+	}
+
+	// NCX record should be at index 2 (after text)
+	ncxRec := extractRecord(data, 2)
+	if !bytes.Equal(ncxRec, ncxData) {
+		t.Error("NCX record content mismatch")
+	}
+
+	// FDST should be at index 3
+	fdstRec := extractRecord(data, 3)
+	if string(fdstRec[:4]) != "FDST" {
+		t.Errorf("FDST at index 3: got %q, want FDST", string(fdstRec[:4]))
+	}
+
+	// FLIS at index 4
+	rec0 := extractRecord(data, 0)
+	mobiStart := 16
+	flisNum := readUint32BE(rec0, mobiStart+176)
+	if flisNum != 4 {
+		t.Errorf("FLISRecordNumber: got %d, want 4", flisNum)
+	}
+
+	// FCIS at index 5
+	fcisNum := readUint32BE(rec0, mobiStart+168)
+	if fcisNum != 5 {
+		t.Errorf("FCISRecordNumber: got %d, want 5", fcisNum)
+	}
+}
+
+func TestWriteTo_WithNCXAndImageRecords(t *testing.T) {
+	html := generateTestHTML(100)
+	uid := uint32(12345)
+	creation := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	img1 := bytes.Repeat([]byte{0xFF}, 100)
+	ncxData := []byte("<html><body><h1>TOC</h1></body></html>")
+
+	cfg := AZW3WriterConfig{
+		Title:        "Test Book",
+		HTML:         html,
+		UniqueID:     &uid,
+		CreationTime: creation,
+		ImageRecords: [][]byte{img1},
+		NCXRecord:    ncxData,
+	}
+	w, err := NewAZW3Writer(cfg)
+	if err != nil {
+		t.Fatalf("NewAZW3Writer failed: %v", err)
+	}
+	data := writeToBuffer(t, w)
+
+	// Record count: Record0 + text×1 + image×1 + NCX + FDST + FLIS + FCIS + EOF = 8
+	numRecords := readUint16BE(data, 76)
+	if numRecords != 8 {
+		t.Errorf("record count: got %d, want 8", numRecords)
+	}
+
+	// Image at index 2
+	imgRec := extractRecord(data, 2)
+	if !bytes.Equal(imgRec, img1) {
+		t.Error("image record content mismatch")
+	}
+
+	// NCX at index 3
+	ncxRec := extractRecord(data, 3)
+	if !bytes.Equal(ncxRec, ncxData) {
+		t.Error("NCX record content mismatch")
+	}
+
+	// FDST at index 4
+	fdstRec := extractRecord(data, 4)
+	if string(fdstRec[:4]) != "FDST" {
+		t.Errorf("FDST at index 4: got %q, want FDST", string(fdstRec[:4]))
+	}
+
+	// FLIS at index 5
+	rec0 := extractRecord(data, 0)
+	mobiStart := 16
+	flisNum := readUint32BE(rec0, mobiStart+176)
+	if flisNum != 5 {
+		t.Errorf("FLISRecordNumber: got %d, want 5", flisNum)
+	}
+
+	// FCIS at index 6
+	fcisNum := readUint32BE(rec0, mobiStart+168)
+	if fcisNum != 6 {
+		t.Errorf("FCISRecordNumber: got %d, want 6", fcisNum)
+	}
+
+	// EXTH 125 should be 8
+	exthStart := 16 + MOBIHeaderSize
+	exthRecordCount := readUint32BE(rec0, exthStart+8)
+	offset := exthStart + 12
+	for i := 0; i < int(exthRecordCount); i++ {
+		recType := readUint32BE(rec0, offset)
+		recLen := readUint32BE(rec0, offset+4)
+		if recType == 125 {
+			val := readUint32BE(rec0, offset+8)
+			if val != 8 {
+				t.Errorf("EXTH 125 (record count): got %d, want 8", val)
+			}
+		}
+		offset += int(recLen)
+	}
+}
+
 func TestWriteTo_ImageRecordsShiftRecordNumbers(t *testing.T) {
 	html := generateTestHTML(100)
 	uid := uint32(12345)

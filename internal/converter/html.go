@@ -200,6 +200,15 @@ func (h *HTMLBuilder) GetChapterID(path string) string {
 	return h.chapterIDs[path]
 }
 
+// GetChapterIDs returns a copy of the chapter ID mapping (file path -> chapter ID).
+func (h *HTMLBuilder) GetChapterIDs() map[string]string {
+	result := make(map[string]string, len(h.chapterIDs))
+	for k, v := range h.chapterIDs {
+		result[k] = v
+	}
+	return result
+}
+
 // Build generates the integrated HTML document
 func (h *HTMLBuilder) Build() (string, error) {
 	// Create a new HTML document from a template

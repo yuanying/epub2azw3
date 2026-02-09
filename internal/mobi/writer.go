@@ -16,6 +16,7 @@ type AZW3WriterConfig struct {
 	Metadata     *epub.Metadata
 	ImageRecords [][]byte
 	CoverOffset  *uint32
+	NCXRecord    []byte
 	Compression  uint16
 	CreationTime time.Time
 	UniqueID     *uint32
@@ -76,6 +77,11 @@ func (w *AZW3Writer) WriteTo(out io.Writer) (int64, error) {
 		firstImageIndex = uint32(nextIndex)
 	}
 	nextIndex += len(cfg.ImageRecords)
+
+	// NCX record (if present) goes after image records, before FDST
+	if len(cfg.NCXRecord) > 0 {
+		nextIndex++
+	}
 
 	fdstIndex := nextIndex
 	_ = fdstIndex // used for record placement
@@ -165,6 +171,9 @@ func (w *AZW3Writer) WriteTo(out io.Writer) (int64, error) {
 	for _, ir := range cfg.ImageRecords {
 		recordSizes = append(recordSizes, len(ir))
 	}
+	if len(cfg.NCXRecord) > 0 {
+		recordSizes = append(recordSizes, len(cfg.NCXRecord))
+	}
 	recordSizes = append(recordSizes, len(fdstData))
 	recordSizes = append(recordSizes, len(flisData))
 	recordSizes = append(recordSizes, len(fcisData))
@@ -221,6 +230,12 @@ func (w *AZW3Writer) WriteTo(out io.Writer) (int64, error) {
 
 	for i, ir := range cfg.ImageRecords {
 		if err := writeAll(ir, fmt.Sprintf("image record %d", i)); err != nil {
+			return written, err
+		}
+	}
+
+	if len(cfg.NCXRecord) > 0 {
+		if err := writeAll(cfg.NCXRecord, "NCX record"); err != nil {
 			return written, err
 		}
 	}

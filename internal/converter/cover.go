@@ -200,13 +200,6 @@ func stripFragment(href string) string {
 	return pathPart
 }
 
-func normalizePath(path string) string {
-	if strings.TrimSpace(path) == "" {
-		return ""
-	}
-	return filepath.ToSlash(filepath.Clean(path))
-}
-
 func looksLikeXHTML(path string) bool {
 	lower := strings.ToLower(path)
 	return strings.HasSuffix(lower, ".xhtml") || strings.HasSuffix(lower, ".html") || strings.HasSuffix(lower, ".htm")

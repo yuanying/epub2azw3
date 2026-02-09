@@ -248,7 +248,7 @@ func TestEXTHFromMetadata_AllFields(t *testing.T) {
 		101: {"Test Publisher"},
 		103: {"A test book description"},
 		104: {"9784123456780"},
-		105: {"Fiction", "Science"},
+		105: {"Fiction; Science"},
 		106: {"2024-01-01"},
 		109: {"Copyright 2024"},
 		503: {"Test Book"},
@@ -504,6 +504,68 @@ func TestExtractISBN(t *testing.T) {
 			}
 			if got != tt.want {
 				t.Errorf("extractISBN(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestJoinSubjects(t *testing.T) {
+	tests := []struct {
+		name     string
+		subjects []string
+		want     string
+	}{
+		{"multiple subjects joined", []string{"Fiction", "Science"}, "Fiction; Science"},
+		{"single subject", []string{"Fiction"}, "Fiction"},
+		{"nil subjects", nil, ""},
+		{"empty string skipped", []string{"Fiction", "", "Science"}, "Fiction; Science"},
+		{"whitespace-only skipped", []string{"Fiction", "  ", "Science"}, "Fiction; Science"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinSubjects(tt.subjects)
+			if got != tt.want {
+				t.Errorf("joinSubjects() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_SubjectJoining(t *testing.T) {
+	tests := []struct {
+		name     string
+		subjects []string
+		want     []string // expected type 105 values; nil means no record
+	}{
+		{"multiple joined", []string{"Fiction", "Science"}, []string{"Fiction; Science"}},
+		{"empty skipped in join", []string{"", "Fiction", "  ", "Science"}, []string{"Fiction; Science"}},
+		{"all empty produces no record", []string{"", "  "}, nil},
+		{"nil produces no record", nil, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Subjects: tt.subjects}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if tt.want == nil {
+				if len(records[105]) != 0 {
+					t.Errorf("type 105 records = %v, want none", records[105])
+				}
+			} else {
+				if len(records[105]) != len(tt.want) {
+					t.Fatalf("type 105 count = %d, want %d", len(records[105]), len(tt.want))
+				}
+				for i, v := range tt.want {
+					if records[105][i] != v {
+						t.Errorf("type 105[%d] = %q, want %q", i, records[105][i], v)
+					}
+				}
 			}
 		})
 	}

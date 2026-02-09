@@ -160,11 +160,9 @@ func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *E
 		h.AddStringRecord(104, isbn)
 	}
 
-	// Subjects → type 105 (each Subject)
-	for _, s := range meta.Subjects {
-		if s != "" {
-			h.AddStringRecord(105, s)
-		}
+	// Subjects → type 105 (joined with "; ")
+	if subj := joinSubjects(meta.Subjects); subj != "" {
+		h.AddStringRecord(105, subj)
 	}
 
 	// Date → type 106 (normalized to YYYY-MM-DD)
@@ -205,6 +203,18 @@ func joinAuthors(creators []epub.Creator) string {
 		authors = append(authors, name)
 	}
 	return strings.Join(authors, " & ")
+}
+
+// joinSubjects joins non-empty subjects with "; ".
+func joinSubjects(subjects []string) string {
+	var filtered []string
+	for _, s := range subjects {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			filtered = append(filtered, s)
+		}
+	}
+	return strings.Join(filtered, "; ")
 }
 
 // extractISBN extracts an ISBN-10 or ISBN-13 from the given identifier string.

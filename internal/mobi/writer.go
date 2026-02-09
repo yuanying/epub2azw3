@@ -11,13 +11,14 @@ import (
 
 // AZW3WriterConfig holds configuration for creating an AZW3Writer.
 type AZW3WriterConfig struct {
-	Title        string
-	HTML         []byte
-	Metadata     *epub.Metadata
-	ImageRecords [][]byte
-	Compression  uint16
-	CreationTime time.Time
-	UniqueID     *uint32
+	Title           string
+	HTML            []byte
+	Metadata        *epub.Metadata
+	ImageRecords    [][]byte
+	Compression     uint16
+	CreationTime    time.Time
+	UniqueID        *uint32
+	CoverImageIndex *int // 0-based index into ImageRecords for cover; nil means no cover
 }
 
 // AZW3Writer assembles and writes a complete AZW3 file.
@@ -97,6 +98,10 @@ func (w *AZW3Writer) WriteTo(out io.Writer) (int64, error) {
 		exth = EXTHFromMetadata(*cfg.Metadata, 0, totalRecordCount)
 	} else {
 		exth = NewEXTHHeader(0, totalRecordCount)
+	}
+
+	if cfg.CoverImageIndex != nil {
+		exth.AddUint32Record(131, uint32(*cfg.CoverImageIndex))
 	}
 
 	exthData, err := exth.Bytes()

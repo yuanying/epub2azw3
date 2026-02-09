@@ -819,3 +819,92 @@ func TestWriteTo_ImageRecordsShiftRecordNumbers(t *testing.T) {
 		offset += int(recLen)
 	}
 }
+
+// --- Step 10: CoverImageIndex ---
+
+func TestWriteTo_CoverImageIndex(t *testing.T) {
+	html := generateTestHTML(100)
+	uid := uint32(12345)
+	creation := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	img1 := bytes.Repeat([]byte{0xFF}, 100)
+	img2 := bytes.Repeat([]byte{0xAA}, 200)
+
+	coverIdx := 1 // second image (0-based)
+	cfg := AZW3WriterConfig{
+		Title:           "Test Book",
+		HTML:            html,
+		UniqueID:        &uid,
+		CreationTime:    creation,
+		ImageRecords:    [][]byte{img1, img2},
+		CoverImageIndex: &coverIdx,
+	}
+	w, err := NewAZW3Writer(cfg)
+	if err != nil {
+		t.Fatalf("NewAZW3Writer failed: %v", err)
+	}
+	data := writeToBuffer(t, w)
+
+	rec0 := extractRecord(data, 0)
+	exthStart := 16 + MOBIHeaderSize
+
+	// Parse EXTH records to find type 131
+	exthRecordCount := readUint32BE(rec0, exthStart+8)
+	offset := exthStart + 12
+
+	var foundCover bool
+	var coverValue uint32
+	for i := 0; i < int(exthRecordCount); i++ {
+		recType := readUint32BE(rec0, offset)
+		recLen := readUint32BE(rec0, offset+4)
+		if recType == 131 {
+			coverValue = readUint32BE(rec0, offset+8)
+			foundCover = true
+		}
+		offset += int(recLen)
+	}
+
+	if !foundCover {
+		t.Fatal("EXTH type 131 (cover image index) not found")
+	}
+	if coverValue != 1 {
+		t.Errorf("EXTH 131 value = %d, want 1", coverValue)
+	}
+}
+
+func TestWriteTo_CoverImageIndexNil(t *testing.T) {
+	html := generateTestHTML(100)
+	uid := uint32(12345)
+	creation := time.Date(2024, 1, 1, 0, 0, 0, 0, time.UTC)
+
+	img1 := bytes.Repeat([]byte{0xFF}, 100)
+
+	cfg := AZW3WriterConfig{
+		Title:           "Test Book",
+		HTML:            html,
+		UniqueID:        &uid,
+		CreationTime:    creation,
+		ImageRecords:    [][]byte{img1},
+		CoverImageIndex: nil, // No cover
+	}
+	w, err := NewAZW3Writer(cfg)
+	if err != nil {
+		t.Fatalf("NewAZW3Writer failed: %v", err)
+	}
+	data := writeToBuffer(t, w)
+
+	rec0 := extractRecord(data, 0)
+	exthStart := 16 + MOBIHeaderSize
+
+	exthRecordCount := readUint32BE(rec0, exthStart+8)
+	offset := exthStart + 12
+
+	for i := 0; i < int(exthRecordCount); i++ {
+		recType := readUint32BE(rec0, offset)
+		recLen := readUint32BE(rec0, offset+4)
+		if recType == 131 {
+			t.Fatal("EXTH type 131 should not be present when CoverImageIndex is nil")
+		}
+		offset += int(recLen)
+	}
+}

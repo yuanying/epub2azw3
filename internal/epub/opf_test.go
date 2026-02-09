@@ -322,6 +322,87 @@ func TestParseOPF_PageProgressionDirection(t *testing.T) {
 	}
 }
 
+func TestParseOPF_IdentifierPrefersSchemeISBN(t *testing.T) {
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/" xmlns:opf="http://www.idpf.org/2007/opf">
+    <dc:title>Identifier Priority</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">urn:uuid:12345678-1234-1234-1234-123456789012</dc:identifier>
+    <dc:identifier opf:scheme="ISBN">978-4-12345678-0</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	if opf.Metadata.Identifier != "978-4-12345678-0" {
+		t.Errorf("Identifier = %q, want %q", opf.Metadata.Identifier, "978-4-12345678-0")
+	}
+}
+
+func TestParseOPF_IdentifierPrefersISBNPattern(t *testing.T) {
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Identifier Pattern</dc:title>
+    <dc:language>ja</dc:language>
+    <dc:identifier id="uid">urn:uuid:aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee</dc:identifier>
+    <dc:identifier>urn:isbn:9784123456780</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	if opf.Metadata.Identifier != "urn:isbn:9784123456780" {
+		t.Errorf("Identifier = %q, want %q", opf.Metadata.Identifier, "urn:isbn:9784123456780")
+	}
+}
+
+func TestParseOPF_IdentifierFallsBackToUniqueIDWithoutISBN(t *testing.T) {
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>No ISBN</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier>non-unique-first</dc:identifier>
+    <dc:identifier id="uid">unique-value</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="chapter" href="chapter.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="chapter"/>
+  </spine>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	if opf.Metadata.Identifier != "unique-value" {
+		t.Errorf("Identifier = %q, want %q", opf.Metadata.Identifier, "unique-value")
+	}
+}
+
 func TestJoinPath_SlashNormalization(t *testing.T) {
 	tests := []struct {
 		name string

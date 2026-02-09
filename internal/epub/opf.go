@@ -4,8 +4,11 @@ import (
 	"encoding/xml"
 	"fmt"
 	"path/filepath"
+	"regexp"
 	"strings"
 )
+
+var opfISBNPattern = regexp.MustCompile(`(?:^|\D)(\d{13}|\d{10})(?:\D|$)`)
 
 // opfPackage represents the OPF XML structure
 type opfPackage struct {
@@ -41,8 +44,10 @@ type opfCreator struct {
 
 // opfIdentifier represents an identifier element
 type opfIdentifier struct {
-	Value string `xml:",chardata"`
-	ID    string `xml:"id,attr"`
+	Value     string `xml:",chardata"`
+	ID        string `xml:"id,attr"`
+	Scheme    string `xml:"scheme,attr"`
+	OPFScheme string `xml:"http://www.idpf.org/2007/opf scheme,attr"`
 }
 
 // opfMeta represents a meta element (EPUB 2.0 and 3.0)
@@ -156,17 +161,7 @@ func parseMetadata(meta *opfMetadata, uniqueID string) Metadata {
 		md.Language = meta.Language[0]
 	}
 
-	// Identifier (find the one marked as unique-identifier)
-	for _, id := range meta.Identifier {
-		if id.ID == uniqueID {
-			md.Identifier = id.Value
-			break
-		}
-	}
-	// If not found, use first one
-	if md.Identifier == "" && len(meta.Identifier) > 0 {
-		md.Identifier = meta.Identifier[0].Value
-	}
+	md.Identifier = selectIdentifier(meta.Identifier, uniqueID)
 
 	// Publisher (use first one)
 	if len(meta.Publisher) > 0 {
@@ -241,6 +236,65 @@ func processCreatorRoles(md *Metadata, meta *opfMetadata) {
 			}
 		}
 	}
+}
+
+func selectIdentifier(identifiers []opfIdentifier, uniqueID string) string {
+	trimmedUniqueID := strings.TrimSpace(uniqueID)
+
+	// 1) Prefer explicit ISBN scheme.
+	for _, id := range identifiers {
+		value := strings.TrimSpace(id.Value)
+		if value == "" {
+			continue
+		}
+		scheme := identifierScheme(id)
+		if strings.EqualFold(strings.TrimSpace(scheme), "isbn") {
+			return value
+		}
+	}
+
+	// 2) Then prefer identifier values that contain an ISBN token.
+	for _, id := range identifiers {
+		value := strings.TrimSpace(id.Value)
+		if value == "" {
+			continue
+		}
+		if hasISBN(value) {
+			return value
+		}
+	}
+
+	// 3) Fallback to unique-identifier.
+	if trimmedUniqueID != "" {
+		for _, id := range identifiers {
+			if strings.TrimSpace(id.ID) == trimmedUniqueID {
+				if value := strings.TrimSpace(id.Value); value != "" {
+					return value
+				}
+			}
+		}
+	}
+
+	// 4) Last fallback: first non-empty identifier.
+	for _, id := range identifiers {
+		if value := strings.TrimSpace(id.Value); value != "" {
+			return value
+		}
+	}
+
+	return ""
+}
+
+func identifierScheme(id opfIdentifier) string {
+	if id.OPFScheme != "" {
+		return id.OPFScheme
+	}
+	return id.Scheme
+}
+
+func hasISBN(value string) bool {
+	stripped := strings.ReplaceAll(value, "-", "")
+	return opfISBNPattern.MatchString(stripped)
 }
 
 // joinPath joins OPF directory with a relative path

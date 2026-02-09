@@ -62,7 +62,7 @@ epub2azw3/
 メタデータ、マニフェスト（map[string]ManifestItem）、スパイン（[]SpineItem）、NCXPath、PageProgressionDirection を保持。
 
 ### epub.Metadata
-Title, Creators([]Creator), Language, Identifier, Publisher, Date, Description, Subjects([]string), Rights, CoverID を保持。
+Title, Creators([]Creator), Language, Identifier, Publisher, Date, Description, Subjects([]string), Rights, CoverID を保持。`Identifier` は EXTH 104 変換用途を優先し、ISBN が見つかる場合は ISBN 系の `dc:identifier` 値を優先的に保持する。
 
 ### converter.HTMLBuilder
 複数 XHTML を単一 HTML に統合する中核コンポーネント。chapters, cssContent, chapterIDs のマッピングを管理。ID 名前空間化（`ch01-` プレフィックス）、`<mbp:pagebreak/>` 挿入、リンク解決、CSS IDセレクタ名前空間化を担当。

@@ -37,6 +37,7 @@ EPUBのメタデータ（Dublin Core要素）とMOBI/AZW3のEXTHレコードは�
 - **ISBN（104）**: `Identifier` からISBN形式（10桁または13桁）を検出して抽出。
 - **タイトル（503）**: `dc:title` の値をそのまま使用。
 - **サブジェクト（105）**: 複数の `dc:subject` を "; " で結合。
+- **識別子選択**: OPFに複数 `dc:identifier` がある場合、`scheme=ISBN`（`opf:scheme` 含む）を最優先し、次にISBN形式を含む値、最後に `unique-identifier` を採用する。
 
 ### KF8必須レコード（Task 02と連携）
 - タイプ121（KF8境界）: Task 02で処理済み
@@ -64,9 +65,9 @@ EPUBのメタデータ（Dublin Core要素）とMOBI/AZW3のEXTHレコードは�
 - 日本語メタデータの正しいUTF-8エンコーディング
 
 ## 完了条件
-- [ ] `epub.Metadata` → `[]EXTHRecord` 変換関数
-- [ ] 各Dublin Coreフィールドの変換ルール実装
-- [ ] 日付フォーマット正規化
-- [ ] ISBN抽出ロジック
-- [ ] 空フィールドのスキップ
-- [ ] 全テストがパス
+- [x] `epub.Metadata` → `[]EXTHRecord` 変換関数
+- [x] 各Dublin Coreフィールドの変換ルール実装
+- [x] 日付フォーマット正規化
+- [x] ISBN抽出ロジック
+- [x] 空フィールドのスキップ
+- [x] 全テストがパス

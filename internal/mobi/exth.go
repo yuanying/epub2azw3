@@ -5,9 +5,14 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"regexp"
+	"strings"
+	"time"
 
 	"github.com/yuanying/epub2azw3/internal/epub"
 )
+
+var isbnPattern = regexp.MustCompile(`(?:^|\D)(\d{13}|\d{10})(?:\D|$)`)
 
 // EXTHRecord represents a single EXTH metadata record.
 type EXTHRecord struct {
@@ -135,11 +140,9 @@ func (h *EXTHHeader) recordsDataSize() int {
 func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *EXTHHeader {
 	h := NewEXTHHeader(boundaryOffset, recordCount)
 
-	// Creators → type 100 (each Creator's Name)
-	for _, c := range meta.Creators {
-		if c.Name != "" {
-			h.AddStringRecord(100, c.Name)
-		}
+	// Creators → type 100 (authors joined with " & ")
+	if author := joinAuthors(meta.Creators); author != "" {
+		h.AddStringRecord(100, author)
 	}
 
 	// Publisher → type 101
@@ -152,21 +155,19 @@ func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *E
 		h.AddStringRecord(103, meta.Description)
 	}
 
-	// Identifier → type 104
-	if meta.Identifier != "" {
-		h.AddStringRecord(104, meta.Identifier)
+	// Identifier → type 104 (ISBN extracted)
+	if isbn, ok := extractISBN(meta.Identifier); ok {
+		h.AddStringRecord(104, isbn)
 	}
 
-	// Subjects → type 105 (each Subject)
-	for _, s := range meta.Subjects {
-		if s != "" {
-			h.AddStringRecord(105, s)
-		}
+	// Subjects → type 105 (joined with "; ")
+	if subj := joinSubjects(meta.Subjects); subj != "" {
+		h.AddStringRecord(105, subj)
 	}
 
-	// Date → type 106
+	// Date → type 106 (normalized to YYYY-MM-DD)
 	if meta.Date != "" {
-		h.AddStringRecord(106, meta.Date)
+		h.AddStringRecord(106, normalizeDate(meta.Date))
 	}
 
 	// Rights → type 109
@@ -185,6 +186,67 @@ func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *E
 	}
 
 	return h
+}
+
+// joinAuthors filters creators with role "aut" or empty role, and joins their names with " & ".
+func joinAuthors(creators []epub.Creator) string {
+	var authors []string
+	for _, c := range creators {
+		role := strings.TrimSpace(c.Role)
+		if role != "" && !strings.EqualFold(role, "aut") {
+			continue
+		}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			continue
+		}
+		authors = append(authors, name)
+	}
+	return strings.Join(authors, " & ")
+}
+
+// joinSubjects joins non-empty subjects with "; ".
+func joinSubjects(subjects []string) string {
+	var filtered []string
+	for _, s := range subjects {
+		s = strings.TrimSpace(s)
+		if s != "" {
+			filtered = append(filtered, s)
+		}
+	}
+	return strings.Join(filtered, "; ")
+}
+
+// extractISBN extracts an ISBN-10 or ISBN-13 from the given identifier string.
+// Hyphens are removed before matching. Returns the extracted ISBN and true if found.
+func extractISBN(identifier string) (string, bool) {
+	stripped := strings.ReplaceAll(identifier, "-", "")
+	m := isbnPattern.FindStringSubmatch(stripped)
+	if m == nil {
+		return "", false
+	}
+	return m[1], true
+}
+
+// normalizeDate converts ISO 8601 date strings to "YYYY-MM-DD" format.
+// If parsing fails, the original string is returned as-is.
+func normalizeDate(date string) string {
+	if date == "" {
+		return ""
+	}
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, date); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return date
 }
 
 // makeUint32Record creates an EXTHRecord with a 4-byte big-endian uint32 value.

@@ -244,11 +244,11 @@ func TestEXTHFromMetadata_AllFields(t *testing.T) {
 	records := parseEXTHRecords(t, data)
 
 	expectedTypes := map[uint32][]string{
-		100: {"Author One", "Author Two"},
+		100: {"Author One & Author Two"},
 		101: {"Test Publisher"},
 		103: {"A test book description"},
-		104: {"978-4-12345678-0"},
-		105: {"Fiction", "Science"},
+		104: {"9784123456780"},
+		105: {"Fiction; Science"},
 		106: {"2024-01-01"},
 		109: {"Copyright 2024"},
 		503: {"Test Book"},
@@ -354,6 +354,391 @@ func TestEXTHFromMetadata_SkipEmptyFields(t *testing.T) {
 	}
 	if len(records[105]) != 1 || records[105][0] != "S" {
 		t.Fatalf("subjects = %v, want [S]", records[105])
+	}
+}
+
+func TestJoinAuthors(t *testing.T) {
+	tests := []struct {
+		name     string
+		creators []epub.Creator
+		want     string
+	}{
+		{
+			name:     "single author with role aut",
+			creators: []epub.Creator{{Name: "Author One", Role: "aut"}},
+			want:     "Author One",
+		},
+		{
+			name:     "single author with empty role",
+			creators: []epub.Creator{{Name: "Author One", Role: ""}},
+			want:     "Author One",
+		},
+		{
+			name: "multiple authors joined with ampersand",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Author Two", Role: ""},
+			},
+			want: "Author One & Author Two",
+		},
+		{
+			name: "editor excluded",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Editor", Role: "edt"},
+			},
+			want: "Author One",
+		},
+		{
+			name:     "uppercase AUT role",
+			creators: []epub.Creator{{Name: "Author One", Role: "AUT"}},
+			want:     "Author One",
+		},
+		{
+			name: "role with surrounding whitespace excluded",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Editor", Role: " edt "},
+			},
+			want: "Author One",
+		},
+		{
+			name: "all editors returns empty",
+			creators: []epub.Creator{
+				{Name: "Editor One", Role: "edt"},
+				{Name: "Editor Two", Role: "edt"},
+			},
+			want: "",
+		},
+		{
+			name:     "empty creators",
+			creators: nil,
+			want:     "",
+		},
+		{
+			name: "empty name skipped",
+			creators: []epub.Creator{
+				{Name: "", Role: "aut"},
+				{Name: "Author", Role: "aut"},
+			},
+			want: "Author",
+		},
+		{
+			name: "whitespace-only name skipped",
+			creators: []epub.Creator{
+				{Name: "  ", Role: "aut"},
+				{Name: "Author", Role: "aut"},
+			},
+			want: "Author",
+		},
+		{
+			name: "Japanese author names",
+			creators: []epub.Creator{
+				{Name: "太宰 治", Role: "aut"},
+				{Name: "芥川 龍之介", Role: "aut"},
+			},
+			want: "太宰 治 & 芥川 龍之介",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinAuthors(tt.creators)
+			if got != tt.want {
+				t.Errorf("joinAuthors() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestNormalizeDate(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"date only", "2024-01-15", "2024-01-15"},
+		{"RFC3339 with Z", "2023-01-15T00:00:00Z", "2023-01-15"},
+		{"RFC3339 with timezone offset", "2023-06-20T14:30:00+09:00", "2023-06-20"},
+		{"datetime without timezone", "2023-03-10T12:00:00", "2023-03-10"},
+		{"datetime with space separator", "2024-01-01 13:45:30", "2024-01-01"},
+		{"year-month only (unparseable)", "2023-01", "2023-01"},
+		{"year only (unparseable)", "2023", "2023"},
+		{"empty string", "", ""},
+		{"not a date", "not-a-date", "not-a-date"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeDate(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeDate(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestExtractISBN(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+		ok    bool
+	}{
+		{"ISBN-13 bare", "9784123456780", "9784123456780", true},
+		{"ISBN-10 bare", "4123456780", "4123456780", true},
+		{"ISBN-13 with hyphens", "978-4-12345678-0", "9784123456780", true},
+		{"urn:isbn prefix", "urn:isbn:9784123456780", "9784123456780", true},
+		{"urn:isbn with hyphens", "urn:isbn:978-4-12345678-0", "9784123456780", true},
+		{"ISBN embedded in text", "abc 9784123456780 def", "9784123456780", true},
+		{"UUID should not match", "urn:uuid:12345678-1234-1234-1234-123456789012", "", false},
+		{"empty string", "", "", false},
+		{"short number", "12345", "", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got, ok := extractISBN(tt.input)
+			if ok != tt.ok {
+				t.Errorf("extractISBN(%q) ok = %v, want %v", tt.input, ok, tt.ok)
+			}
+			if got != tt.want {
+				t.Errorf("extractISBN(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestJoinSubjects(t *testing.T) {
+	tests := []struct {
+		name     string
+		subjects []string
+		want     string
+	}{
+		{"multiple subjects joined", []string{"Fiction", "Science"}, "Fiction; Science"},
+		{"single subject", []string{"Fiction"}, "Fiction"},
+		{"nil subjects", nil, ""},
+		{"empty string skipped", []string{"Fiction", "", "Science"}, "Fiction; Science"},
+		{"whitespace-only skipped", []string{"Fiction", "  ", "Science"}, "Fiction; Science"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinSubjects(tt.subjects)
+			if got != tt.want {
+				t.Errorf("joinSubjects() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_SubjectJoining(t *testing.T) {
+	tests := []struct {
+		name     string
+		subjects []string
+		want     []string // expected type 105 values; nil means no record
+	}{
+		{"multiple joined", []string{"Fiction", "Science"}, []string{"Fiction; Science"}},
+		{"empty skipped in join", []string{"", "Fiction", "  ", "Science"}, []string{"Fiction; Science"}},
+		{"all empty produces no record", []string{"", "  "}, nil},
+		{"nil produces no record", nil, nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Subjects: tt.subjects}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if tt.want == nil {
+				if len(records[105]) != 0 {
+					t.Errorf("type 105 records = %v, want none", records[105])
+				}
+			} else {
+				if len(records[105]) != len(tt.want) {
+					t.Fatalf("type 105 count = %d, want %d", len(records[105]), len(tt.want))
+				}
+				for i, v := range tt.want {
+					if records[105][i] != v {
+						t.Errorf("type 105[%d] = %q, want %q", i, records[105][i], v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_ISBNExtraction(t *testing.T) {
+	tests := []struct {
+		name       string
+		identifier string
+		want       []string // expected type 104 values; nil means no record
+	}{
+		{"ISBN-13 extracted", "978-4-12345678-0", []string{"9784123456780"}},
+		{"urn:isbn extracted", "urn:isbn:9784123456780", []string{"9784123456780"}},
+		{"UUID produces no record", "urn:uuid:12345678-1234-1234-1234-123456789012", nil},
+		{"empty produces no record", "", nil},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Identifier: tt.identifier}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if tt.want == nil {
+				if len(records[104]) != 0 {
+					t.Errorf("type 104 records = %v, want none", records[104])
+				}
+			} else {
+				if len(records[104]) != len(tt.want) {
+					t.Fatalf("type 104 count = %d, want %d", len(records[104]), len(tt.want))
+				}
+				for i, v := range tt.want {
+					if records[104][i] != v {
+						t.Errorf("type 104[%d] = %q, want %q", i, records[104][i], v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_DateNormalization(t *testing.T) {
+	tests := []struct {
+		name string
+		date string
+		want string
+	}{
+		{"ISO 8601 full", "2023-01-15T00:00:00Z", "2023-01-15"},
+		{"date only", "2024-01-15", "2024-01-15"},
+		{"unparseable passes through", "2023", "2023"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Date: tt.date}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if len(records[106]) != 1 {
+				t.Fatalf("type 106 count = %d, want 1", len(records[106]))
+			}
+			if records[106][0] != tt.want {
+				t.Errorf("type 106 = %q, want %q", records[106][0], tt.want)
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_AuthorJoining(t *testing.T) {
+	tests := []struct {
+		name     string
+		creators []epub.Creator
+		want     []string // expected type 100 record values
+	}{
+		{
+			name: "multiple authors joined",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Author Two", Role: ""},
+			},
+			want: []string{"Author One & Author Two"},
+		},
+		{
+			name: "editor excluded from joining",
+			creators: []epub.Creator{
+				{Name: "Author", Role: "aut"},
+				{Name: "Editor", Role: "edt"},
+			},
+			want: []string{"Author"},
+		},
+		{
+			name:     "no authors produces no record",
+			creators: []epub.Creator{{Name: "Editor", Role: "edt"}},
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Creators: tt.creators}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if tt.want == nil {
+				if len(records[100]) != 0 {
+					t.Errorf("type 100 records = %v, want none", records[100])
+				}
+			} else {
+				if len(records[100]) != len(tt.want) {
+					t.Fatalf("type 100 count = %d, want %d", len(records[100]), len(tt.want))
+				}
+				for i, v := range tt.want {
+					if records[100][i] != v {
+						t.Errorf("type 100[%d] = %q, want %q", i, records[100][i], v)
+					}
+				}
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_JapaneseMetadata(t *testing.T) {
+	meta := epub.Metadata{
+		Title:       "走れメロス",
+		Creators:    []epub.Creator{{Name: "太宰 治", Role: "aut"}},
+		Language:    "ja",
+		Identifier:  "urn:isbn:978-4-12345678-0",
+		Publisher:   "青空文庫",
+		Date:        "1940-05-01T00:00:00+09:00",
+		Description: "友情と信頼の物語",
+		Subjects:    []string{"小説", "日本文学"},
+		Rights:      "パブリックドメイン",
+	}
+
+	h := EXTHFromMetadata(meta, 0, 0)
+	data, err := h.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes() error: %v", err)
+	}
+
+	records := parseEXTHRecords(t, data)
+
+	expectedTypes := map[uint32][]string{
+		100: {"太宰 治"},
+		101: {"青空文庫"},
+		103: {"友情と信頼の物語"},
+		104: {"9784123456780"},
+		105: {"小説; 日本文学"},
+		106: {"1940-05-01"},
+		109: {"パブリックドメイン"},
+		503: {"走れメロス"},
+		524: {"ja"},
+	}
+
+	for recType, expectedValues := range expectedTypes {
+		found := records[recType]
+		if len(found) != len(expectedValues) {
+			t.Fatalf("type %d: got %d records, want %d", recType, len(found), len(expectedValues))
+		}
+		for i, v := range expectedValues {
+			if found[i] != v {
+				t.Errorf("type %d[%d] = %q, want %q", recType, i, found[i], v)
+			}
+		}
 	}
 }
 

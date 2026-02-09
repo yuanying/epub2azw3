@@ -41,7 +41,9 @@ func (p *Pipeline) Convert() error {
 		return err
 	}
 
-	return p.writeAZW3(html, &opf.Metadata, imageMapper)
+	coverImageIndex := p.resolveCoverIndex(opf, imageMapper)
+
+	return p.writeAZW3(html, &opf.Metadata, imageMapper, coverImageIndex)
 }
 
 // parseEPUB opens the EPUB file and parses the OPF.
@@ -178,18 +180,41 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *m
 	return html, imageMapper, nil
 }
 
+// resolveCoverIndex detects the cover image and resolves its index in the ImageMapper.
+func (p *Pipeline) resolveCoverIndex(opf *epub.OPF, imageMapper *mobi.ImageMapper) *int {
+	coverInfo := opf.DetectCover()
+	if coverInfo == nil {
+		log.Printf("warning: no cover image detected")
+		return nil
+	}
+
+	if imageMapper == nil {
+		log.Printf("warning: cover image detected (%s) but no images in output", coverInfo.Href)
+		return nil
+	}
+
+	idx, ok := imageMapper.PathToIndex[coverInfo.Href]
+	if !ok {
+		log.Printf("warning: cover image %q not found in image records", coverInfo.Href)
+		return nil
+	}
+
+	return &idx
+}
+
 // writeAZW3 creates the AZW3 file from the integrated HTML and metadata.
-func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper) error {
+func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper, coverImageIndex *int) error {
 	title := metadata.Title
 	if title == "" {
 		title = "Untitled"
 	}
 
 	cfg := mobi.AZW3WriterConfig{
-		Title:       title,
-		HTML:        []byte(html),
-		Metadata:    metadata,
-		Compression: mobi.CompressionPalmDoc,
+		Title:           title,
+		HTML:            []byte(html),
+		Metadata:        metadata,
+		Compression:     mobi.CompressionPalmDoc,
+		CoverImageIndex: coverImageIndex,
 	}
 
 	if imageMapper != nil {

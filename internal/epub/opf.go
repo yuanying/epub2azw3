@@ -327,4 +327,3 @@ func joinPath(base, rel string) string {
 	}
 	return filepath.ToSlash(filepath.Join(base, rel))
 }
-

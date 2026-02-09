@@ -524,4 +524,3 @@ func TestParseOPF_NoGuide(t *testing.T) {
 		t.Errorf("Guide count = %d, want 0", len(opf.Guide))
 	}
 }
-

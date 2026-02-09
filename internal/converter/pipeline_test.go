@@ -643,6 +643,170 @@ func TestPipeline_Convert_SVGFiltered(t *testing.T) {
 	}
 }
 
+// createCoverTestEPUB creates an EPUB with a cover image specified via properties="cover-image".
+func createCoverTestEPUB(t *testing.T, dir string) string {
+	t.Helper()
+	epubPath := filepath.Join(dir, "cover.epub")
+	f, err := os.Create(epubPath)
+	if err != nil {
+		t.Fatalf("failed to create test EPUB: %v", err)
+	}
+
+	w := zip.NewWriter(f)
+
+	header := &zip.FileHeader{
+		Name:   "mimetype",
+		Method: zip.Store,
+	}
+	mw, _ := w.CreateHeader(header)
+	mw.Write([]byte("application/epub+zip"))
+
+	cw, _ := w.Create("META-INF/container.xml")
+	cw.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+
+	// OPF with cover-image property
+	ow, _ := w.Create("OEBPS/content.opf")
+	ow.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Cover Test Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">urn:uuid:cover-test</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="photo" href="images/photo.png" media-type="image/png"/>
+    <item id="cover-img" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`))
+
+	xw, _ := w.Create("OEBPS/text/chapter1.xhtml")
+	xw.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 1</title></head>
+<body><h1>Hello World</h1><p>Test chapter.</p></body>
+</html>`))
+
+	// Create fake image files - photo first, then cover
+	pw, _ := w.Create("OEBPS/images/photo.png")
+	pw.Write([]byte{0x89, 'P', 'N', 'G', 0x0D, 0x0A, 0x1A, 0x0A})
+
+	iw, _ := w.Create("OEBPS/images/cover.jpg")
+	iw.Write([]byte{0xFF, 0xD8, 0xFF, 0xE0, 0x00, 0x10, 'J', 'F', 'I', 'F'})
+
+	w.Close()
+	f.Close()
+
+	return epubPath
+}
+
+func TestPipeline_Convert_CoverImageEXTH131(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createCoverTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+	})
+
+	err := p.Convert()
+	if err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	rec0 := extractRecord(data, 0)
+	if len(rec0) < 280 {
+		t.Fatal("Record 0 too short")
+	}
+
+	// Find EXTH 131 record
+	mobiHeaderSize := 248
+	exthStart := 16 + mobiHeaderSize
+
+	if string(rec0[exthStart:exthStart+4]) != "EXTH" {
+		t.Fatalf("EXTH magic not found at offset %d", exthStart)
+	}
+
+	exthRecordCount := readUint32BE(rec0, exthStart+8)
+	offset := exthStart + 12
+
+	var foundCover bool
+	var coverValue uint32
+	for i := 0; i < int(exthRecordCount); i++ {
+		recType := readUint32BE(rec0, offset)
+		recLen := readUint32BE(rec0, offset+4)
+		if recType == 131 {
+			coverValue = readUint32BE(rec0, offset+8)
+			foundCover = true
+		}
+		offset += int(recLen)
+	}
+
+	if !foundCover {
+		t.Fatal("EXTH type 131 (cover image index) not found in output")
+	}
+
+	// cover.jpg is the second image in manifest order (photo.png=0, cover.jpg=1)
+	if coverValue != 1 {
+		t.Errorf("EXTH 131 value = %d, want 1 (cover.jpg is second image)", coverValue)
+	}
+}
+
+func TestPipeline_Convert_NoCoverImageNoEXTH131(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createMinimalTestEPUB(t, dir) // No cover image
+	outputPath := filepath.Join(dir, "output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+	})
+
+	err := p.Convert()
+	if err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	rec0 := extractRecord(data, 0)
+	mobiHeaderSize := 248
+	exthStart := 16 + mobiHeaderSize
+
+	if string(rec0[exthStart:exthStart+4]) != "EXTH" {
+		t.Fatalf("EXTH magic not found")
+	}
+
+	exthRecordCount := readUint32BE(rec0, exthStart+8)
+	offset := exthStart + 12
+
+	for i := 0; i < int(exthRecordCount); i++ {
+		recType := readUint32BE(rec0, offset)
+		recLen := readUint32BE(rec0, offset+4)
+		if recType == 131 {
+			t.Fatal("EXTH type 131 should not be present when no cover image exists")
+		}
+		offset += int(recLen)
+	}
+}
+
 func TestPipeline_Convert_WithTestdataEPUB(t *testing.T) {
 	// Use the project's testdata/test.epub for an E2E test
 	epubPath := filepath.Join("..", "..", "testdata", "test.epub")

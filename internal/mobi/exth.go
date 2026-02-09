@@ -5,6 +5,7 @@ import (
 	"encoding/binary"
 	"fmt"
 	"math"
+	"strings"
 
 	"github.com/yuanying/epub2azw3/internal/epub"
 )
@@ -135,11 +136,9 @@ func (h *EXTHHeader) recordsDataSize() int {
 func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *EXTHHeader {
 	h := NewEXTHHeader(boundaryOffset, recordCount)
 
-	// Creators → type 100 (each Creator's Name)
-	for _, c := range meta.Creators {
-		if c.Name != "" {
-			h.AddStringRecord(100, c.Name)
-		}
+	// Creators → type 100 (authors joined with " & ")
+	if author := joinAuthors(meta.Creators); author != "" {
+		h.AddStringRecord(100, author)
 	}
 
 	// Publisher → type 101
@@ -185,6 +184,23 @@ func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *E
 	}
 
 	return h
+}
+
+// joinAuthors filters creators with role "aut" or empty role, and joins their names with " & ".
+func joinAuthors(creators []epub.Creator) string {
+	var authors []string
+	for _, c := range creators {
+		role := strings.TrimSpace(c.Role)
+		if role != "" && !strings.EqualFold(role, "aut") {
+			continue
+		}
+		name := strings.TrimSpace(c.Name)
+		if name == "" {
+			continue
+		}
+		authors = append(authors, name)
+	}
+	return strings.Join(authors, " & ")
 }
 
 // makeUint32Record creates an EXTHRecord with a 4-byte big-endian uint32 value.

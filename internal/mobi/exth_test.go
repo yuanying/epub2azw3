@@ -244,7 +244,7 @@ func TestEXTHFromMetadata_AllFields(t *testing.T) {
 	records := parseEXTHRecords(t, data)
 
 	expectedTypes := map[uint32][]string{
-		100: {"Author One", "Author Two"},
+		100: {"Author One & Author Two"},
 		101: {"Test Publisher"},
 		103: {"A test book description"},
 		104: {"978-4-12345678-0"},
@@ -354,6 +354,156 @@ func TestEXTHFromMetadata_SkipEmptyFields(t *testing.T) {
 	}
 	if len(records[105]) != 1 || records[105][0] != "S" {
 		t.Fatalf("subjects = %v, want [S]", records[105])
+	}
+}
+
+func TestJoinAuthors(t *testing.T) {
+	tests := []struct {
+		name     string
+		creators []epub.Creator
+		want     string
+	}{
+		{
+			name:     "single author with role aut",
+			creators: []epub.Creator{{Name: "Author One", Role: "aut"}},
+			want:     "Author One",
+		},
+		{
+			name:     "single author with empty role",
+			creators: []epub.Creator{{Name: "Author One", Role: ""}},
+			want:     "Author One",
+		},
+		{
+			name: "multiple authors joined with ampersand",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Author Two", Role: ""},
+			},
+			want: "Author One & Author Two",
+		},
+		{
+			name: "editor excluded",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Editor", Role: "edt"},
+			},
+			want: "Author One",
+		},
+		{
+			name:     "uppercase AUT role",
+			creators: []epub.Creator{{Name: "Author One", Role: "AUT"}},
+			want:     "Author One",
+		},
+		{
+			name: "role with surrounding whitespace excluded",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Editor", Role: " edt "},
+			},
+			want: "Author One",
+		},
+		{
+			name: "all editors returns empty",
+			creators: []epub.Creator{
+				{Name: "Editor One", Role: "edt"},
+				{Name: "Editor Two", Role: "edt"},
+			},
+			want: "",
+		},
+		{
+			name:     "empty creators",
+			creators: nil,
+			want:     "",
+		},
+		{
+			name: "empty name skipped",
+			creators: []epub.Creator{
+				{Name: "", Role: "aut"},
+				{Name: "Author", Role: "aut"},
+			},
+			want: "Author",
+		},
+		{
+			name: "whitespace-only name skipped",
+			creators: []epub.Creator{
+				{Name: "  ", Role: "aut"},
+				{Name: "Author", Role: "aut"},
+			},
+			want: "Author",
+		},
+		{
+			name: "Japanese author names",
+			creators: []epub.Creator{
+				{Name: "太宰 治", Role: "aut"},
+				{Name: "芥川 龍之介", Role: "aut"},
+			},
+			want: "太宰 治 & 芥川 龍之介",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := joinAuthors(tt.creators)
+			if got != tt.want {
+				t.Errorf("joinAuthors() = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_AuthorJoining(t *testing.T) {
+	tests := []struct {
+		name     string
+		creators []epub.Creator
+		want     []string // expected type 100 record values
+	}{
+		{
+			name: "multiple authors joined",
+			creators: []epub.Creator{
+				{Name: "Author One", Role: "aut"},
+				{Name: "Author Two", Role: ""},
+			},
+			want: []string{"Author One & Author Two"},
+		},
+		{
+			name: "editor excluded from joining",
+			creators: []epub.Creator{
+				{Name: "Author", Role: "aut"},
+				{Name: "Editor", Role: "edt"},
+			},
+			want: []string{"Author"},
+		},
+		{
+			name:     "no authors produces no record",
+			creators: []epub.Creator{{Name: "Editor", Role: "edt"}},
+			want:     nil,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Creators: tt.creators}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if tt.want == nil {
+				if len(records[100]) != 0 {
+					t.Errorf("type 100 records = %v, want none", records[100])
+				}
+			} else {
+				if len(records[100]) != len(tt.want) {
+					t.Fatalf("type 100 count = %d, want %d", len(records[100]), len(tt.want))
+				}
+				for i, v := range tt.want {
+					if records[100][i] != v {
+						t.Errorf("type 100[%d] = %q, want %q", i, records[100][i], v)
+					}
+				}
+			}
+		})
 	}
 }
 

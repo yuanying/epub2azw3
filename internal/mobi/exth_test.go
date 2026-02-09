@@ -696,6 +696,52 @@ func TestEXTHFromMetadata_AuthorJoining(t *testing.T) {
 	}
 }
 
+func TestEXTHFromMetadata_JapaneseMetadata(t *testing.T) {
+	meta := epub.Metadata{
+		Title:       "走れメロス",
+		Creators:    []epub.Creator{{Name: "太宰 治", Role: "aut"}},
+		Language:    "ja",
+		Identifier:  "urn:isbn:978-4-12345678-0",
+		Publisher:   "青空文庫",
+		Date:        "1940-05-01T00:00:00+09:00",
+		Description: "友情と信頼の物語",
+		Subjects:    []string{"小説", "日本文学"},
+		Rights:      "パブリックドメイン",
+	}
+
+	h := EXTHFromMetadata(meta, 0, 0)
+	data, err := h.Bytes()
+	if err != nil {
+		t.Fatalf("Bytes() error: %v", err)
+	}
+
+	records := parseEXTHRecords(t, data)
+
+	expectedTypes := map[uint32][]string{
+		100: {"太宰 治"},
+		101: {"青空文庫"},
+		103: {"友情と信頼の物語"},
+		104: {"9784123456780"},
+		105: {"小説; 日本文学"},
+		106: {"1940-05-01"},
+		109: {"パブリックドメイン"},
+		503: {"走れメロス"},
+		524: {"ja"},
+	}
+
+	for recType, expectedValues := range expectedTypes {
+		found := records[recType]
+		if len(found) != len(expectedValues) {
+			t.Fatalf("type %d: got %d records, want %d", recType, len(found), len(expectedValues))
+		}
+		for i, v := range expectedValues {
+			if found[i] != v {
+				t.Errorf("type %d[%d] = %q, want %q", recType, i, found[i], v)
+			}
+		}
+	}
+}
+
 // parseEXTHRecords is a test helper that parses the EXTH binary data into a map of type -> []string values.
 func parseEXTHRecords(t *testing.T, data []byte) map[uint32][]string {
 	t.Helper()

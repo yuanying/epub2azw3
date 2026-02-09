@@ -64,9 +64,9 @@ EPUBのメタデータ（Dublin Core要素）とMOBI/AZW3のEXTHレコードは�
 - 日本語メタデータの正しいUTF-8エンコーディング
 
 ## 完了条件
-- [ ] `epub.Metadata` → `[]EXTHRecord` 変換関数
-- [ ] 各Dublin Coreフィールドの変換ルール実装
-- [ ] 日付フォーマット正規化
-- [ ] ISBN抽出ロジック
-- [ ] 空フィールドのスキップ
-- [ ] 全テストがパス
+- [x] `epub.Metadata` → `[]EXTHRecord` 変換関数
+- [x] 各Dublin Coreフィールドの変換ルール実装
+- [x] 日付フォーマット正規化
+- [x] ISBN抽出ロジック
+- [x] 空フィールドのスキップ
+- [x] 全テストがパス

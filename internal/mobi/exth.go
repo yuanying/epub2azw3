@@ -6,6 +6,7 @@ import (
 	"fmt"
 	"math"
 	"strings"
+	"time"
 
 	"github.com/yuanying/epub2azw3/internal/epub"
 )
@@ -163,9 +164,9 @@ func EXTHFromMetadata(meta epub.Metadata, boundaryOffset, recordCount uint32) *E
 		}
 	}
 
-	// Date → type 106
+	// Date → type 106 (normalized to YYYY-MM-DD)
 	if meta.Date != "" {
-		h.AddStringRecord(106, meta.Date)
+		h.AddStringRecord(106, normalizeDate(meta.Date))
 	}
 
 	// Rights → type 109
@@ -201,6 +202,27 @@ func joinAuthors(creators []epub.Creator) string {
 		authors = append(authors, name)
 	}
 	return strings.Join(authors, " & ")
+}
+
+// normalizeDate converts ISO 8601 date strings to "YYYY-MM-DD" format.
+// If parsing fails, the original string is returned as-is.
+func normalizeDate(date string) string {
+	if date == "" {
+		return ""
+	}
+	formats := []string{
+		time.RFC3339Nano,
+		time.RFC3339,
+		"2006-01-02T15:04:05",
+		"2006-01-02 15:04:05",
+		"2006-01-02",
+	}
+	for _, layout := range formats {
+		if t, err := time.Parse(layout, date); err == nil {
+			return t.Format("2006-01-02")
+		}
+	}
+	return date
 }
 
 // makeUint32Record creates an EXTHRecord with a 4-byte big-endian uint32 value.

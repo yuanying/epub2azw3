@@ -451,6 +451,63 @@ func TestJoinAuthors(t *testing.T) {
 	}
 }
 
+func TestNormalizeDate(t *testing.T) {
+	tests := []struct {
+		name  string
+		input string
+		want  string
+	}{
+		{"date only", "2024-01-15", "2024-01-15"},
+		{"RFC3339 with Z", "2023-01-15T00:00:00Z", "2023-01-15"},
+		{"RFC3339 with timezone offset", "2023-06-20T14:30:00+09:00", "2023-06-20"},
+		{"datetime without timezone", "2023-03-10T12:00:00", "2023-03-10"},
+		{"datetime with space separator", "2024-01-01 13:45:30", "2024-01-01"},
+		{"year-month only (unparseable)", "2023-01", "2023-01"},
+		{"year only (unparseable)", "2023", "2023"},
+		{"empty string", "", ""},
+		{"not a date", "not-a-date", "not-a-date"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			got := normalizeDate(tt.input)
+			if got != tt.want {
+				t.Errorf("normalizeDate(%q) = %q, want %q", tt.input, got, tt.want)
+			}
+		})
+	}
+}
+
+func TestEXTHFromMetadata_DateNormalization(t *testing.T) {
+	tests := []struct {
+		name string
+		date string
+		want string
+	}{
+		{"ISO 8601 full", "2023-01-15T00:00:00Z", "2023-01-15"},
+		{"date only", "2024-01-15", "2024-01-15"},
+		{"unparseable passes through", "2023", "2023"},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			meta := epub.Metadata{Date: tt.date}
+			h := EXTHFromMetadata(meta, 0, 0)
+			data, err := h.Bytes()
+			if err != nil {
+				t.Fatalf("Bytes() error: %v", err)
+			}
+			records := parseEXTHRecords(t, data)
+			if len(records[106]) != 1 {
+				t.Fatalf("type 106 count = %d, want 1", len(records[106]))
+			}
+			if records[106][0] != tt.want {
+				t.Errorf("type 106 = %q, want %q", records[106][0], tt.want)
+			}
+		})
+	}
+}
+
 func TestEXTHFromMetadata_AuthorJoining(t *testing.T) {
 	tests := []struct {
 		name     string

@@ -12,8 +12,12 @@ EPUBからカバー画像を特定し、AZW3のカバーとして設定する。
 Kindle端末のライブラリ画面でカバー画像を表示するために、AZW3ファイル内でカバー画像を特定してメタデータに記録する必要がある。EPUBではカバー画像の指定方法が複数存在するため、優先順位を付けて検出する。
 
 ## 実装場所
-- 新規ファイル: `internal/converter/cover.go`
-- テストファイル: `internal/converter/cover_test.go`
+- `internal/epub/models.go` — GuideReference 構造体、OPF.Guide フィールド
+- `internal/epub/opf.go` — guide XML パース追加
+- `internal/epub/cover.go` — CoverInfo 構造体、DetectCover メソッド、FindCoverImage ラッパー
+- `internal/epub/cover_test.go` — DetectCover / FindCoverImage テスト
+- `internal/mobi/writer.go` — AZW3WriterConfig.CoverImageIndex、EXTH 131 出力
+- `internal/converter/pipeline.go` — resolveCoverIndex、パイプライン接続
 
 ## 要件
 
@@ -23,7 +27,9 @@ Kindle端末のライブラリ画面でカバー画像を表示するために�
 2. **メタデータの `<meta name="cover" content="...">`**（EPUB 2.0）
    - Metadata.CoverID に対応するマニフェストアイテム
 3. **ガイドの `<reference type="cover" ...>`**
-   - OPFのguideセクション（現在未パース → パース追加が必要な場合あり）
+   - OPFのguideセクション（パース済み: `OPF.Guide` フィールド）
+   - guide の Href がマニフェストの画像アイテムにマッチする場合のみ使用
+   - Href にフラグメント（`#`）が付く場合はベースパスのみで比較
 4. **ファイル名パターン**
    - マニフェスト内で "cover" を含むファイル名（`cover.jpg`, `cover.png`, `Cover.jpeg` 等）
 
@@ -64,8 +70,8 @@ Kindle端末のライブラリ画面でカバー画像を表示するために�
 - EXTHレコード131の値計算
 
 ## 完了条件
-- [ ] カバー画像検出関数（優先順位付き）
-- [ ] 各検出方法の実装
-- [ ] EXTHレコード131の値計算
-- [ ] カバー画像なし時の警告処理
-- [ ] 全テストがパス
+- [x] カバー画像検出関数（優先順位付き）
+- [x] 各検出方法の実装
+- [x] EXTHレコード131の値計算
+- [x] カバー画像なし時の警告処理
+- [x] 全テストがパス

@@ -328,23 +328,3 @@ func joinPath(base, rel string) string {
 	return filepath.ToSlash(filepath.Join(base, rel))
 }
 
-// FindCoverImage finds the cover image in the manifest
-func (opf *OPF) FindCoverImage() (string, bool) {
-	// Method 1: EPUB 3.0 - check for cover-image property
-	for _, item := range opf.Manifest {
-		for _, prop := range item.Properties {
-			if prop == "cover-image" {
-				return item.Href, true
-			}
-		}
-	}
-
-	// Method 2: EPUB 2.0 - check for meta name="cover"
-	if opf.Metadata.CoverID != "" {
-		if item, ok := opf.Manifest[opf.Metadata.CoverID]; ok {
-			return item.Href, true
-		}
-	}
-
-	return "", false
-}

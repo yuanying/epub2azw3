@@ -18,6 +18,19 @@ type opfPackage struct {
 	Metadata opfMetadata `xml:"metadata"`
 	Manifest opfManifest `xml:"manifest"`
 	Spine    opfSpine    `xml:"spine"`
+	Guide    opfGuide    `xml:"guide"`
+}
+
+// opfGuide represents the guide section
+type opfGuide struct {
+	References []opfGuideReference `xml:"reference"`
+}
+
+// opfGuideReference represents a reference in the guide
+type opfGuideReference struct {
+	Type  string `xml:"type,attr"`
+	Title string `xml:"title,attr"`
+	Href  string `xml:"href,attr"`
 }
 
 // opfMetadata represents the metadata section
@@ -139,6 +152,15 @@ func ParseOPF(content []byte, opfDir string) (*OPF, error) {
 		if ncxItem, ok := opf.Manifest[pkg.Spine.Toc]; ok {
 			opf.NCXPath = ncxItem.Href
 		}
+	}
+
+	// Parse guide
+	for _, ref := range pkg.Guide.References {
+		opf.Guide = append(opf.Guide, GuideReference{
+			Type:  ref.Type,
+			Title: ref.Title,
+			Href:  joinPath(opfDir, ref.Href),
+		})
 	}
 
 	return opf, nil

@@ -450,6 +450,81 @@ func TestJoinPath_SlashNormalization(t *testing.T) {
 	}
 }
 
+func TestParseOPF_Guide(t *testing.T) {
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="2.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Guide Test</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">guide-001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="cover" href="cover.xhtml" media-type="application/xhtml+xml"/>
+    <item id="toc" href="toc.xhtml" media-type="application/xhtml+xml"/>
+    <item id="ch1" href="chapter1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+  <guide>
+    <reference type="cover" title="Cover" href="cover.xhtml"/>
+    <reference type="toc" title="Table of Contents" href="toc.xhtml"/>
+  </guide>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "OEBPS/")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	if len(opf.Guide) != 2 {
+		t.Fatalf("Guide count = %d, want 2", len(opf.Guide))
+	}
+
+	if opf.Guide[0].Type != "cover" {
+		t.Errorf("Guide[0].Type = %q, want %q", opf.Guide[0].Type, "cover")
+	}
+	if opf.Guide[0].Title != "Cover" {
+		t.Errorf("Guide[0].Title = %q, want %q", opf.Guide[0].Title, "Cover")
+	}
+	if opf.Guide[0].Href != "OEBPS/cover.xhtml" {
+		t.Errorf("Guide[0].Href = %q, want %q", opf.Guide[0].Href, "OEBPS/cover.xhtml")
+	}
+
+	if opf.Guide[1].Type != "toc" {
+		t.Errorf("Guide[1].Type = %q, want %q", opf.Guide[1].Type, "toc")
+	}
+	if opf.Guide[1].Href != "OEBPS/toc.xhtml" {
+		t.Errorf("Guide[1].Href = %q, want %q", opf.Guide[1].Href, "OEBPS/toc.xhtml")
+	}
+}
+
+func TestParseOPF_NoGuide(t *testing.T) {
+	opfContent := `<?xml version="1.0" encoding="UTF-8"?>
+<package version="3.0" xmlns="http://www.idpf.org/2007/opf" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>No Guide</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">no-guide-001</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="ch1.xhtml" media-type="application/xhtml+xml"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`
+
+	opf, err := ParseOPF([]byte(opfContent), "")
+	if err != nil {
+		t.Fatalf("ParseOPF failed: %v", err)
+	}
+
+	if len(opf.Guide) != 0 {
+		t.Errorf("Guide count = %d, want 0", len(opf.Guide))
+	}
+}
+
 func TestFindCoverImage(t *testing.T) {
 	tests := []struct {
 		name     string

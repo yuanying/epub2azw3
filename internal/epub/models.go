@@ -8,6 +8,7 @@ type OPF struct {
 	Spine                    []SpineItem
 	NCXPath                  string
 	PageProgressionDirection string // "rtl", "ltr", or "" (not specified)
+	Guide                    []GuideReference
 }
 
 // Metadata represents the metadata section of the OPF
@@ -43,4 +44,11 @@ type ManifestItem struct {
 type SpineItem struct {
 	IDRef  string
 	Linear bool
+}
+
+// GuideReference represents a reference in the guide section
+type GuideReference struct {
+	Type  string
+	Title string
+	Href  string
 }

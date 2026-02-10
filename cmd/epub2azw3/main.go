@@ -32,10 +32,12 @@ const (
 	defaultJPEGQuality   = 85
 	defaultMaxImageSize  = 127
 	defaultMaxImageWidth = 600
+	defaultOutputFormat  = "azw3"
 )
 
 type CLIOptions struct {
 	OutputPath    string
+	OutputFormat  string
 	JPEGQuality   int
 	MaxImageSize  int
 	MaxImageWidth int
@@ -57,8 +59,16 @@ func normalizeLogLevel(level string, verbose bool) string {
 	return normalized
 }
 
-func defaultOutputPath(inputPath string) string {
-	return strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + ".azw3"
+func normalizeOutputFormat(format string) string {
+	normalized := strings.ToLower(strings.TrimSpace(format))
+	if normalized == "" {
+		return defaultOutputFormat
+	}
+	return normalized
+}
+
+func defaultOutputPath(inputPath string, outputFormat string) string {
+	return strings.TrimSuffix(inputPath, filepath.Ext(inputPath)) + "." + outputFormat
 }
 
 func validateCLIOptions(opts CLIOptions) error {
@@ -82,6 +92,12 @@ func validateCLIOptions(opts CLIOptions) error {
 	case "text", "json":
 	default:
 		return fmt.Errorf("invalid --log-format %q (expected text/json)", opts.LogFormat)
+	}
+
+	switch strings.ToLower(strings.TrimSpace(opts.OutputFormat)) {
+	case "azw3", "mobi":
+	default:
+		return fmt.Errorf("invalid --format %q (expected azw3/mobi)", opts.OutputFormat)
 	}
 
 	return nil
@@ -132,11 +148,13 @@ func readCLIOptions(cmd *cobra.Command, args []string) (converter.ConvertOptions
 	noImages, _ := cmd.Flags().GetBool("no-images")
 	logLevel, _ := cmd.Flags().GetString("log-level")
 	logFormat, _ := cmd.Flags().GetString("log-format")
+	outputFormat, _ := cmd.Flags().GetString("format")
 	strict, _ := cmd.Flags().GetBool("strict")
 	verbose, _ := cmd.Flags().GetBool("verbose")
 
 	cliOpts := CLIOptions{
 		OutputPath:    outputPath,
+		OutputFormat:  normalizeOutputFormat(outputFormat),
 		JPEGQuality:   quality,
 		MaxImageSize:  maxImageSize,
 		MaxImageWidth: maxImageWidth,
@@ -148,7 +166,7 @@ func readCLIOptions(cmd *cobra.Command, args []string) (converter.ConvertOptions
 	}
 
 	if cliOpts.OutputPath == "" {
-		cliOpts.OutputPath = defaultOutputPath(inputPath)
+		cliOpts.OutputPath = defaultOutputPath(inputPath, cliOpts.OutputFormat)
 	}
 
 	if err := validateCLIOptions(cliOpts); err != nil {
@@ -171,9 +189,9 @@ func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
 		Use:     "epub2azw3",
 		Version: version,
-		Short:   "Convert EPUB files to AZW3 (Kindle) format",
+		Short:   "Convert EPUB files to AZW3/MOBI (Kindle) format",
 		Long: `epub2azw3 is a command-line tool that converts EPUB ebooks to
-Amazon Kindle compatible AZW3 (KF8) format.
+Amazon Kindle compatible AZW3/MOBI (KF8) format.
 
 It is a standalone implementation in Go without external dependencies
 like Calibre.`,
@@ -194,7 +212,8 @@ like Calibre.`,
 
 	cmd.SetVersionTemplate(fmt.Sprintf("epub2azw3 %s (commit: %s, built: %s)\n", version, commit, date))
 	cmd.SetErr(os.Stderr)
-	cmd.Flags().StringP("output", "o", "", "Output file path (default: input with .azw3 extension)")
+	cmd.Flags().StringP("output", "o", "", "Output file path (default: input with extension based on --format)")
+	cmd.Flags().String("format", defaultOutputFormat, "Output format (azw3/mobi)")
 	cmd.Flags().IntP("quality", "q", defaultJPEGQuality, "JPEG quality (60-100)")
 	cmd.Flags().Int("max-image-size", defaultMaxImageSize, "Max image size in KB")
 	cmd.Flags().Int("max-image-width", defaultMaxImageWidth, "Max image width in pixels")

@@ -1,6 +1,6 @@
 # epub2azw3
 
-EPUB to AZW3 converter - a standalone Go implementation for converting EPUB ebooks to Amazon Kindle compatible AZW3 (KF8) format without external dependencies like Calibre.
+EPUB to AZW3/MOBI converter - a standalone Go implementation for converting EPUB ebooks to Amazon Kindle compatible KF8 format without external dependencies like Calibre.
 
 ## Installation
 
@@ -16,7 +16,8 @@ epub2azw3 [flags] <input.epub>
 
 ### Flags
 
-- `-o, --output`: output file path (default: `<input>.azw3`)
+- `-o, --output`: output file path (default: extension based on `--format`)
+- `--format`: `azw3|mobi` (default: `azw3`)
 - `-q, --quality`: JPEG quality (`60-100`, default: `85`)
 - `--max-image-size`: max image size in KB (default: `127`)
 - `--max-image-width`: max image width in px (default: `600`)

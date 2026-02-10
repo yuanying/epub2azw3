@@ -390,8 +390,8 @@ func TestWriteTo_EXTHValues(t *testing.T) {
 	if !foundBoundary {
 		t.Fatal("EXTH type 121 (boundary) not found")
 	}
-	if boundary != 0 {
-		t.Errorf("EXTH 121 (boundary): got %d, want 0 (KF8-only)", boundary)
+	if boundary != 1 {
+		t.Errorf("EXTH 121 (boundary): got %d, want 1 (first KF8 text record)", boundary)
 	}
 
 	if !foundRecordCount {

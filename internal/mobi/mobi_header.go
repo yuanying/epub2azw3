@@ -55,14 +55,23 @@ const (
 	// MOBIHeaderSize is the size of the MOBI header in bytes (KF8).
 	MOBIHeaderSize = 248
 
+	// MOBI7HeaderSize is the size of the MOBI header in bytes (MOBI7).
+	MOBI7HeaderSize = 232
+
 	// EncodingUTF8 is the MOBI encoding code for UTF-8.
 	EncodingUTF8 uint32 = 65001
 
 	// MOBITypeKF8 is the MOBI type for KF8 format.
 	MOBITypeKF8 uint32 = 248
 
+	// MOBITypeMOBI7 is the MOBI type for MOBI7 format.
+	MOBITypeMOBI7 uint32 = 2
+
 	// FileVersionKF8 is the file version for KF8 format.
 	FileVersionKF8 uint32 = 8
+
+	// FileVersionMOBI7 is the file version for MOBI7 format.
+	FileVersionMOBI7 uint32 = 6
 
 	// EXTHFlagPresent indicates that EXTH records are present.
 	EXTHFlagPresent uint32 = 0x40
@@ -107,6 +116,8 @@ type MOBIHeaderConfig struct {
 	ExtraRecordDataFlags uint32
 	FDSTFlowCount        uint32
 	FDSTOffset           uint32
+	MOBIType             uint32 // 0 defaults to KF8 (248)
+	FileVersion          uint32 // 0 defaults to KF8 (8)
 }
 
 // MOBIHeader represents the internal state of a MOBI header for Record 0.
@@ -124,6 +135,8 @@ type MOBIHeader struct {
 	ExtraRecordDataFlags uint32
 	FDSTFlowCount        uint32
 	FDSTOffset           uint32
+	MOBIType             uint32
+	FileVersion          uint32
 }
 
 // NewMOBIHeader creates a MOBIHeader from the given configuration.
@@ -147,6 +160,15 @@ func NewMOBIHeader(cfg MOBIHeaderConfig) (*MOBIHeader, error) {
 		}
 	}
 
+	mobiType := cfg.MOBIType
+	if mobiType == 0 {
+		mobiType = MOBITypeKF8
+	}
+	fileVersion := cfg.FileVersion
+	if fileVersion == 0 {
+		fileVersion = FileVersionKF8
+	}
+
 	return &MOBIHeader{
 		Compression:          cfg.Compression,
 		TextLength:           cfg.TextLength,
@@ -161,7 +183,18 @@ func NewMOBIHeader(cfg MOBIHeaderConfig) (*MOBIHeader, error) {
 		ExtraRecordDataFlags: cfg.ExtraRecordDataFlags,
 		FDSTFlowCount:        cfg.FDSTFlowCount,
 		FDSTOffset:           cfg.FDSTOffset,
+		MOBIType:             mobiType,
+		FileVersion:          fileVersion,
 	}, nil
+}
+
+// headerSize returns the MOBI header size based on the format type.
+// MOBI7 uses 232 bytes, KF8 uses 248 bytes.
+func (h *MOBIHeader) headerSize() uint32 {
+	if h.MOBIType == MOBITypeMOBI7 {
+		return MOBI7HeaderSize
+	}
+	return MOBIHeaderSize
 }
 
 // PalmDOCHeaderBytes serializes the 16-byte PalmDOC header.
@@ -205,12 +238,12 @@ func (h *MOBIHeader) MOBIHeaderBytes(fullNameOffset, fullNameLength, exthFlags u
 	}
 
 	// Offset 4: header length
-	if err := writeU32(MOBIHeaderSize); err != nil {
+	if err := writeU32(h.headerSize()); err != nil {
 		return nil, fmt.Errorf("failed to write header length: %w", err)
 	}
 
 	// Offset 8: MOBI type
-	if err := writeU32(MOBITypeKF8); err != nil {
+	if err := writeU32(h.MOBIType); err != nil {
 		return nil, fmt.Errorf("failed to write MOBI type: %w", err)
 	}
 
@@ -225,7 +258,7 @@ func (h *MOBIHeader) MOBIHeaderBytes(fullNameOffset, fullNameLength, exthFlags u
 	}
 
 	// Offset 20: file version
-	if err := writeU32(FileVersionKF8); err != nil {
+	if err := writeU32(h.FileVersion); err != nil {
 		return nil, fmt.Errorf("failed to write file version: %w", err)
 	}
 
@@ -386,28 +419,36 @@ func (h *MOBIHeader) MOBIHeaderBytes(fullNameOffset, fullNameLength, exthFlags u
 		return nil, fmt.Errorf("failed to write INDX record offset: %w", err)
 	}
 
-	// KF8 additional fields (offsets 216-247)
-
-	// Offsets 216-232: unused (5 * 0xFFFFFFFF)
-	for i := 0; i < 5; i++ {
-		if err := writeU32(0xFFFFFFFF); err != nil {
-			return nil, fmt.Errorf("failed to write KF8 unused field: %w", err)
+	// Format-specific fields (offsets 216+)
+	if h.MOBIType == MOBITypeMOBI7 {
+		// MOBI7: offsets 216-231 (16 bytes of 0x00 padding)
+		if _, err := buf.Write(make([]byte, 16)); err != nil {
+			return nil, fmt.Errorf("failed to write MOBI7 padding: %w", err)
 		}
-	}
+	} else {
+		// KF8: offsets 216-247
 
-	// Offset 236: FDST flow count
-	if err := writeU32(h.FDSTFlowCount); err != nil {
-		return nil, fmt.Errorf("failed to write FDST flow count: %w", err)
-	}
+		// Offsets 216-232: unused (5 * 0xFFFFFFFF)
+		for i := 0; i < 5; i++ {
+			if err := writeU32(0xFFFFFFFF); err != nil {
+				return nil, fmt.Errorf("failed to write KF8 unused field: %w", err)
+			}
+		}
 
-	// Offset 240: FDST offset
-	if err := writeU32(h.FDSTOffset); err != nil {
-		return nil, fmt.Errorf("failed to write FDST offset: %w", err)
-	}
+		// Offset 236: FDST flow count
+		if err := writeU32(h.FDSTFlowCount); err != nil {
+			return nil, fmt.Errorf("failed to write FDST flow count: %w", err)
+		}
 
-	// Offset 244: unused (0)
-	if err := writeU32(0); err != nil {
-		return nil, fmt.Errorf("failed to write unused field: %w", err)
+		// Offset 240: FDST offset
+		if err := writeU32(h.FDSTOffset); err != nil {
+			return nil, fmt.Errorf("failed to write FDST offset: %w", err)
+		}
+
+		// Offset 244: unused (0)
+		if err := writeU32(0); err != nil {
+			return nil, fmt.Errorf("failed to write unused field: %w", err)
+		}
 	}
 
 	return buf.Bytes(), nil
@@ -429,7 +470,8 @@ func (h *MOBIHeader) Record0Bytes(exthData []byte, fullName string) ([]byte, err
 
 	// Validate sizes before uint32 conversion
 	fullNameBytes := []byte(fullName)
-	if len(exthData) > math.MaxUint32-MOBIHeaderSize {
+	hdrSize := int(h.headerSize())
+	if len(exthData) > math.MaxUint32-hdrSize {
 		return nil, fmt.Errorf("EXTH data too large: %d bytes", len(exthData))
 	}
 	if len(fullNameBytes) > math.MaxUint32 {
@@ -437,7 +479,7 @@ func (h *MOBIHeader) Record0Bytes(exthData []byte, fullName string) ([]byte, err
 	}
 
 	// Calculate Full Name position relative to MOBI header start
-	fullNameOffset := uint32(MOBIHeaderSize + len(exthData))
+	fullNameOffset := uint32(hdrSize + len(exthData))
 	fullNameLength := uint32(len(fullNameBytes))
 
 	// Determine EXTH flags

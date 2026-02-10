@@ -2,6 +2,12 @@
 
 EPUB to AZW3 converter - a standalone Go implementation for converting EPUB ebooks to Amazon Kindle compatible AZW3 (KF8) format without external dependencies like Calibre.
 
+## Installation
+
+```bash
+go install github.com/yuanying/epub2azw3/cmd/epub2azw3@latest
+```
+
 ## Usage
 
 ```bash

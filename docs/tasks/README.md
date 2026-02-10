@@ -117,7 +117,7 @@ PDBHeader（78 バイト固定）と RecordEntry の配列を保持。`NewPDB()`
 | # | タスク | 実装ファイル | 依存 |
 |---|--------|------------|------|
 | [16](./16-image-optimization.md) | 画像最適化 | `internal/converter/image.go` | Task 11 |
-| [17](./17-cli-enhancement.md) | CLI 強化 & エラーハンドリング | `cmd/epub2azw3/main.go` | Task 07 |
+| [17](./17-cli-enhancement.md) | CLI 強化 & エラーハンドリング | `cmd/epub2azw3/main.go`, `internal/converter/pipeline.go` | Task 07 |
 | [18](./18-concurrent-processing.md) | 並行処理 | 各パッケージ | Task 10, 16 |
 
 ### Phase 5: 高度な機能（オプション）

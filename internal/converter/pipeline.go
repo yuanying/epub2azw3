@@ -2,8 +2,9 @@ package converter
 
 import (
 	"bytes"
+	"context"
 	"fmt"
-	"log"
+	"log/slog"
 	"os"
 	"path/filepath"
 	"strings"
@@ -20,50 +21,98 @@ type ConvertOptions struct {
 	MaxImageWidth     int
 	JPEGQuality       int
 	MaxImageSizeBytes int
+	NoImages          bool
+	Strict            bool
+	Logger            *slog.Logger
 }
+
+type ErrorLevel string
+
+const (
+	ErrorLevelFatal       ErrorLevel = "Fatal"
+	ErrorLevelRecoverable ErrorLevel = "Recoverable"
+	ErrorLevelAcceptable  ErrorLevel = "Acceptable"
+)
+
+// ConvertError represents a structured conversion error.
+type ConvertError struct {
+	Level   ErrorLevel
+	Context string
+	Message string
+	Cause   error
+}
+
+// discardHandler is a slog.Handler that discards all log records.
+type discardHandler struct{}
+
+func (discardHandler) Enabled(context.Context, slog.Level) bool  { return false }
+func (discardHandler) Handle(context.Context, slog.Record) error { return nil }
+func (h discardHandler) WithAttrs([]slog.Attr) slog.Handler      { return h }
+func (h discardHandler) WithGroup(string) slog.Handler           { return h }
 
 // Pipeline orchestrates the EPUB to AZW3 conversion.
 type Pipeline struct {
 	Options ConvertOptions
+	errors  []ConvertError
+	logger  *slog.Logger
 }
 
 // NewPipeline creates a new conversion pipeline.
 func NewPipeline(opts ConvertOptions) *Pipeline {
-	return &Pipeline{Options: opts}
+	logger := opts.Logger
+	if logger == nil {
+		logger = slog.New(discardHandler{})
+	}
+	return &Pipeline{
+		Options: opts,
+		logger:  logger,
+		errors:  make([]ConvertError, 0),
+	}
 }
 
 // Convert executes the conversion pipeline.
 func (p *Pipeline) Convert() error {
+	p.stageStart("parse", "parse EPUB")
 	reader, opf, err := p.parseEPUB()
 	if err != nil {
-		return err
+		return p.fatal("parse", "failed to parse EPUB", err)
 	}
 	defer reader.Close()
+	p.stageDone("parse", "parse EPUB")
+
+	if err := p.validateRequiredMetadata(&opf.Metadata); err != nil {
+		return p.fatal("metadata", "required metadata is missing", err)
+	}
 
 	cover := DetectCoverInfo(opf, reader)
 	if cover == nil {
-		log.Printf("warning: cover image not found")
+		p.acceptable("cover", "cover image not found", nil)
 	}
 
+	p.stageStart("build", "build integrated HTML")
 	html, imageMapper, builder, err := p.buildHTML(reader, opf, cover)
 	if err != nil {
-		return err
+		return p.fatal("build", "failed to build HTML", err)
 	}
+	p.stageDone("build", "build integrated HTML")
 
 	var coverOffset *uint32
-	if cover != nil {
+	if cover != nil && !p.Options.NoImages {
 		if offset, ok := ComputeCoverOffset(cover, imageMapper); ok {
 			coverOffset = &offset
 		} else {
-			log.Printf("warning: cover image detected (%s) but not found in image records: %s",
-				cover.DetectionMethod, cover.Href)
+			p.recoverable(
+				"cover",
+				fmt.Sprintf("cover image detected (%s) but not found in image records", cover.DetectionMethod),
+				fmt.Errorf("%s", cover.Href),
+			)
 		}
 	}
 
-	// Load NCX for TOC generation
+	p.stageStart("toc", "load NCX and generate TOC")
 	ncx, err := epub.LoadNCX(reader, opf)
 	if err != nil {
-		log.Printf("warning: failed to load NCX: %v", err)
+		p.recoverable("toc", "failed to load NCX", err)
 	}
 
 	// Generate inline TOC and insert into HTML (before image reference transformation)
@@ -80,9 +129,9 @@ func (p *Pipeline) Convert() error {
 	var ncxRecord []byte
 	if tocGen != nil {
 		finalHTML := []byte(html)
-		entries, err := tocGen.BuildTOCEntries(finalHTML)
-		if err != nil {
-			log.Printf("warning: failed to build TOC entries: %v", err)
+		entries, buildErr := tocGen.BuildTOCEntries(finalHTML)
+		if buildErr != nil {
+			p.recoverable("toc", "failed to build TOC entries", buildErr)
 		} else if len(entries) > 0 {
 			ncxEntries := convertTOCEntries(entries)
 			ncxRecord = mobi.GenerateNCXRecord(mobi.NCXRecordConfig{
@@ -92,8 +141,48 @@ func (p *Pipeline) Convert() error {
 			})
 		}
 	}
+	p.stageDone("toc", "load NCX and generate TOC")
 
-	return p.writeAZW3(html, &opf.Metadata, imageMapper, ncxRecord, coverOffset)
+	p.stageStart("write", "write AZW3")
+	if err := p.writeAZW3(html, &opf.Metadata, imageMapper, ncxRecord, coverOffset); err != nil {
+		return p.fatal("write", "failed to write AZW3", err)
+	}
+	p.stageDone("write", "write AZW3")
+
+	if stat, err := os.Stat(p.Options.OutputPath); err == nil {
+		p.logger.Info(fmt.Sprintf("output size: %d bytes", stat.Size()), "stage", "result")
+	}
+
+	if p.Options.Strict {
+		if err := p.strictFailureIfNeeded(); err != nil {
+			return err
+		}
+	}
+
+	return nil
+}
+
+func (p *Pipeline) strictFailureIfNeeded() error {
+	recoverables := make([]ConvertError, 0)
+	for _, ce := range p.errors {
+		if ce.Level == ErrorLevelRecoverable {
+			recoverables = append(recoverables, ce)
+		}
+	}
+	if len(recoverables) == 0 {
+		return nil
+	}
+
+	p.logger.Error(fmt.Sprintf("%d recoverable errors collected", len(recoverables)), "stage", "strict")
+	for i, ce := range recoverables {
+		if ce.Cause != nil {
+			p.logger.Error(fmt.Sprintf("[%d] %s: %s (%v)", i+1, ce.Context, ce.Message, ce.Cause), "stage", "strict")
+			continue
+		}
+		p.logger.Error(fmt.Sprintf("[%d] %s: %s", i+1, ce.Context, ce.Message), "stage", "strict")
+	}
+
+	return fmt.Errorf("strict mode failed: %d recoverable errors", len(recoverables))
 }
 
 // parseEPUB opens the EPUB file and parses the OPF.
@@ -119,12 +208,30 @@ func (p *Pipeline) parseEPUB() (*epub.EPUBReader, *epub.OPF, error) {
 	return reader, opf, nil
 }
 
+func (p *Pipeline) validateRequiredMetadata(metadata *epub.Metadata) error {
+	missing := make([]string, 0, 3)
+	if strings.TrimSpace(metadata.Title) == "" {
+		missing = append(missing, "title")
+	}
+	if strings.TrimSpace(metadata.Language) == "" {
+		missing = append(missing, "language")
+	}
+	if strings.TrimSpace(metadata.Identifier) == "" {
+		missing = append(missing, "identifier")
+	}
+	if len(missing) == 0 {
+		return nil
+	}
+	return fmt.Errorf("missing required metadata: %s", strings.Join(missing, ", "))
+}
+
 // buildHTML loads spine items and builds the integrated HTML.
 // It also collects images referenced in the content.
 func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF, cover *CoverInfo) (string, *mobi.ImageMapper, *HTMLBuilder, error) {
 	builder := NewHTMLBuilder()
 	cssCache := make(map[string]string)
 	validChapters := 0
+	totalChapters := 0
 
 	type cssRef struct {
 		chapterID string
@@ -134,25 +241,35 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF, cover *Cove
 
 	for _, spineItem := range opf.Spine {
 		manifestItem, ok := opf.Manifest[spineItem.IDRef]
+		if ok && isXHTML(manifestItem.MediaType) {
+			totalChapters++
+		}
+	}
+
+	chapterProgress := 0
+	for _, spineItem := range opf.Spine {
+		manifestItem, ok := opf.Manifest[spineItem.IDRef]
 		if !ok {
-			log.Printf("warning: spine item %q not found in manifest, skipping", spineItem.IDRef)
+			p.recoverable("html", fmt.Sprintf("spine item %q not found in manifest, skipping", spineItem.IDRef), nil)
 			continue
 		}
 
-		// Check if this is an XHTML file
 		if !isXHTML(manifestItem.MediaType) {
 			continue
 		}
 
+		chapterProgress++
+		p.logger.Info(fmt.Sprintf("chapter %d/%d: %s", chapterProgress, totalChapters, manifestItem.Href), "stage", "progress")
+
 		data, err := reader.ReadFile(manifestItem.Href)
 		if err != nil {
-			log.Printf("warning: failed to read %q: %v, skipping", manifestItem.Href, err)
+			p.recoverable("html", fmt.Sprintf("failed to read %q, skipping", manifestItem.Href), err)
 			continue
 		}
 
 		content, err := epub.LoadContent(manifestItem.ID, manifestItem.Href, data)
 		if err != nil {
-			log.Printf("warning: failed to parse %q: %v, skipping", manifestItem.Href, err)
+			p.recoverable("html", fmt.Sprintf("failed to parse %q, skipping", manifestItem.Href), err)
 			continue
 		}
 
@@ -167,7 +284,7 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF, cover *Cove
 		})
 
 		if err := builder.AddChapter(content); err != nil {
-			log.Printf("warning: failed to add chapter %q: %v, skipping", manifestItem.Href, err)
+			p.recoverable("html", fmt.Sprintf("failed to add chapter %q, skipping", manifestItem.Href), err)
 			continue
 		}
 
@@ -192,7 +309,7 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF, cover *Cove
 		if !ok {
 			cssData, err := reader.ReadFile(ref.path)
 			if err != nil {
-				log.Printf("warning: failed to read CSS %q: %v, skipping", ref.path, err)
+				p.recoverable("css", fmt.Sprintf("failed to read CSS %q, skipping", ref.path), err)
 				continue
 			}
 			cssText = string(cssData)
@@ -201,34 +318,57 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF, cover *Cove
 		builder.AddChapterCSS(ref.chapterID, cssText)
 	}
 
-	// Collect images from manifest in document order
 	imageMapper := mobi.NewImageMapper()
+	if p.Options.NoImages {
+		p.logger.Info("--no-images enabled; removing all img tags", "stage", "images")
+		builder.RemoveImages()
+		html, err := builder.Build()
+		if err != nil {
+			return "", nil, nil, fmt.Errorf("failed to build HTML: %w", err)
+		}
+		return html, imageMapper, builder, nil
+	}
+
+	// Collect images from manifest in document order
 	optimizer := NewImageOptimizer(p.Options)
+	totalImages := 0
+	for _, id := range opf.ManifestOrder {
+		item, ok := opf.Manifest[id]
+		if ok && isImage(item.MediaType) {
+			totalImages++
+		}
+	}
+
+	imageProgress := 0
 	for _, id := range opf.ManifestOrder {
 		item, ok := opf.Manifest[id]
 		if !ok {
 			continue
 		}
 		if isSVG(item.MediaType) {
-			log.Printf("warning: SVG image %q is not supported and will be skipped", item.Href)
+			p.acceptable("images", fmt.Sprintf("SVG image %q is not supported and will be skipped", item.Href), nil)
 			continue
 		}
 		if !isImage(item.MediaType) {
 			continue
 		}
+
+		imageProgress++
+		p.logger.Info(fmt.Sprintf("image %d/%d: %s", imageProgress, totalImages, item.Href), "stage", "progress")
+
 		imgData, err := reader.ReadFile(item.Href)
 		if err != nil {
-			log.Printf("warning: failed to read image %q: %v, skipping", item.Href, err)
+			p.recoverable("images", fmt.Sprintf("failed to read image %q, skipping", item.Href), err)
 			continue
 		}
 
 		isCover := cover != nil && cover.Href == item.Href
 		optimized, optErr := optimizer.Optimize(item.Href, item.MediaType, imgData, isCover)
 		if optErr != nil {
-			log.Printf("warning: image optimization failed for %q: %v, using original", item.Href, optErr)
+			p.recoverable("images", fmt.Sprintf("image optimization failed for %q; using original", item.Href), optErr)
 		}
 		if optimized.Warning != "" {
-			log.Printf("warning: image optimization for %q: %s", item.Href, optimized.Warning)
+			p.recoverable("images", fmt.Sprintf("image optimization warning for %q: %s", item.Href, optimized.Warning), nil)
 		}
 
 		mediaType := item.MediaType
@@ -289,6 +429,57 @@ func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *
 	}
 
 	return nil
+}
+
+func (p *Pipeline) stageStart(stage, message string) {
+	p.logger.Info("start: "+message, "stage", stage)
+}
+
+func (p *Pipeline) stageDone(stage, message string) {
+	p.logger.Info("done: "+message, "stage", stage)
+}
+
+func (p *Pipeline) fatal(stage, message string, cause error) error {
+	p.errors = append(p.errors, ConvertError{
+		Level:   ErrorLevelFatal,
+		Context: stage,
+		Message: message,
+		Cause:   cause,
+	})
+	if cause != nil {
+		p.logger.Error(message, "stage", stage, "error", cause)
+		return fmt.Errorf("%s: %w", message, cause)
+	}
+	p.logger.Error(message, "stage", stage)
+	return fmt.Errorf("%s", message)
+}
+
+func (p *Pipeline) recoverable(stage, message string, cause error) {
+	p.errors = append(p.errors, ConvertError{
+		Level:   ErrorLevelRecoverable,
+		Context: stage,
+		Message: message,
+		Cause:   cause,
+	})
+	if cause != nil {
+		p.logger.Warn(message, "stage", stage, "error", cause)
+		return
+	}
+	p.logger.Warn(message, "stage", stage)
+}
+
+func (p *Pipeline) acceptable(stage, message string, cause error) {
+	p.errors = append(p.errors, ConvertError{
+		Level:   ErrorLevelAcceptable,
+		Context: stage,
+		Message: message,
+		Cause:   cause,
+	})
+	if cause != nil {
+		p.logger.Info(message, "stage", stage, "error", cause)
+		return
+	}
+	p.logger.Info(message, "stage", stage)
 }
 
 // convertTOCEntries converts converter.TOCEntry slice to mobi.NCXEntry slice.

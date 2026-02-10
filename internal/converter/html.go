@@ -209,6 +209,13 @@ func (h *HTMLBuilder) GetChapterIDs() map[string]string {
 	return result
 }
 
+// RemoveImages removes all img elements from all chapters.
+func (h *HTMLBuilder) RemoveImages() {
+	for _, chapter := range h.chapters {
+		chapter.Document.Find("img").Remove()
+	}
+}
+
 // Build generates the integrated HTML document
 func (h *HTMLBuilder) Build() (string, error) {
 	// Create a new HTML document from a template

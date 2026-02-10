@@ -13,7 +13,10 @@ Phase 1のMVPパイプラインで実装した最小CLIを拡張し、画像品�
 
 ## 実装場所
 - 更新ファイル: `cmd/epub2azw3/main.go`
+- 更新ファイル: `internal/converter/pipeline.go`
+- 更新ファイル: `internal/converter/html.go`
 - テストファイル: `cmd/epub2azw3/main_test.go`（必要に応じて）
+- テストファイル: `internal/converter/pipeline_test.go`
 
 ## 要件
 
@@ -27,8 +30,13 @@ Phase 1のMVPパイプラインで実装した最小CLIを拡張し、画像品�
 | `--max-image-width` | | 最大画像幅（px） | 600 |
 | `--no-images` | | 画像を含めない | false |
 | `--log-level` | `-l` | ログレベル（error/warn/info/debug） | info |
+| `--log-format` | | ログ出力フォーマット（text/json） | text |
 | `--strict` | | Strictモード（警告もエラー扱い） | false |
 | `--verbose` | `-v` | 詳細出力 | false |
+
+補足:
+- `--verbose` 指定時はログレベルを `debug` として扱う
+- `--no-images` 指定時は画像レコードを生成せず、HTML中の `<img>` 要素を削除する
 
 ### 進捗表示
 - 各ステージの開始・完了を表示
@@ -56,12 +64,13 @@ Phase 1のMVPパイプラインで実装した最小CLIを拡張し、画像品�
 
 #### Strictモード
 - 回復可能エラーも致命的エラーとして扱う
-- すべての警告を収集して最後に一括表示
+- すべての警告を収集し、変換処理完了後に一括表示してエラー終了
 
 ### ログ出力
-- `log/slog` または `log` パッケージを使用
+- `log/slog` パッケージを使用
 - レベル: ERROR, WARN, INFO, DEBUG
-- フォーマット: `[LEVEL] context: message`
+- `--log-format text`（デフォルト）: `level=INFO msg="message" stage=context`（タイムスタンプなし）
+- `--log-format json`: `{"time":"...","level":"INFO","msg":"message","stage":"context"}`（タイムスタンプあり）
 
 ## データ構造
 
@@ -96,10 +105,10 @@ Phase 1のMVPパイプラインで実装した最小CLIを拡張し、画像品�
 - 通常モードで回復可能エラーが継続すること
 
 ## 完了条件
-- [ ] CLIオプション追加（cobra フラグ）
-- [ ] オプションバリデーション
-- [ ] 構造化エラーハンドリング（エラー分類）
-- [ ] Strictモード実装
-- [ ] 進捗表示
-- [ ] ログレベル切り替え
-- [ ] 全テストがパス
+- [x] CLIオプション追加（cobra フラグ）
+- [x] オプションバリデーション
+- [x] 構造化エラーハンドリング（エラー分類）
+- [x] Strictモード実装
+- [x] 進捗表示
+- [x] ログレベル切り替え
+- [x] 全テストがパス

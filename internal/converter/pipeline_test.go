@@ -3,15 +3,91 @@ package converter
 import (
 	"archive/zip"
 	"bytes"
+	"context"
 	"encoding/binary"
 	"image"
 	"image/color"
 	"image/jpeg"
 	"image/png"
+	"log/slog"
 	"os"
 	"path/filepath"
+	"strings"
+	"sync"
 	"testing"
+
+	"github.com/yuanying/epub2azw3/internal/mobi"
 )
+
+// recordCollector is a test slog.Handler that collects log records.
+type recordCollector struct {
+	mu      sync.Mutex
+	records []slog.Record
+	level   slog.Level
+}
+
+func newRecordCollector(level slog.Level) *recordCollector {
+	return &recordCollector{level: level}
+}
+
+func (h *recordCollector) Enabled(_ context.Context, level slog.Level) bool {
+	return level >= h.level
+}
+
+func (h *recordCollector) Handle(_ context.Context, r slog.Record) error {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	h.records = append(h.records, r.Clone())
+	return nil
+}
+
+func (h *recordCollector) WithAttrs([]slog.Attr) slog.Handler { return h }
+func (h *recordCollector) WithGroup(string) slog.Handler      { return h }
+
+func (h *recordCollector) Records() []slog.Record {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return append([]slog.Record{}, h.records...)
+}
+
+func (h *recordCollector) hasRecord(level slog.Level, msgSubstr string) bool {
+	for _, r := range h.Records() {
+		if r.Level == level && strings.Contains(r.Message, msgSubstr) {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *recordCollector) hasAttr(msgSubstr, key, value string) bool {
+	for _, r := range h.Records() {
+		if !strings.Contains(r.Message, msgSubstr) {
+			continue
+		}
+		found := false
+		r.Attrs(func(a slog.Attr) bool {
+			if a.Key == key && a.Value.String() == value {
+				found = true
+				return false
+			}
+			return true
+		})
+		if found {
+			return true
+		}
+	}
+	return false
+}
+
+func (h *recordCollector) countByLevel(level slog.Level) int {
+	count := 0
+	for _, r := range h.Records() {
+		if r.Level == level {
+			count++
+		}
+	}
+	return count
+}
 
 // readUint16BE reads a big-endian uint16 from data at offset.
 func readUint16BE(data []byte, offset int) uint16 {
@@ -507,6 +583,110 @@ func TestPipeline_Convert_NoValidChapters(t *testing.T) {
 	err := p.Convert()
 	if err == nil {
 		t.Fatal("expected error when all chapters are invalid, got nil")
+	}
+}
+
+func TestPipeline_Convert_StrictModeFailsOnRecoverable(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createBrokenXHTMLTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "strict-output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+		Strict:     true,
+	})
+
+	err := p.Convert()
+	if err == nil {
+		t.Fatal("expected strict mode to fail on recoverable error, got nil")
+	}
+	if !strings.Contains(err.Error(), "strict mode failed") {
+		t.Fatalf("error = %v, want strict mode failure", err)
+	}
+}
+
+func TestPipeline_Convert_NoImagesRemovesImageRecordsAndTags(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createImageTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "no-images.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+		NoImages:   true,
+	})
+
+	if err := p.Convert(); err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	rec0 := extractRecord(data, 0)
+	if len(rec0) < 100 {
+		t.Fatal("Record 0 too short")
+	}
+	firstImageIndex := readUint32BE(rec0, 96)
+	if firstImageIndex != 0xFFFFFFFF {
+		t.Fatalf("firstImageIndex = %d, want 0xFFFFFFFF", firstImageIndex)
+	}
+
+	// PalmDOC text record count is at offset 8 in record 0.
+	textRecordCount := int(readUint16BE(rec0, 8))
+	var htmlBuf bytes.Buffer
+	for i := 1; i <= textRecordCount; i++ {
+		rec := extractRecord(data, i)
+		if len(rec) == 0 {
+			continue
+		}
+		dec, decErr := mobi.PalmDocDecompress(rec)
+		if decErr != nil {
+			t.Fatalf("failed to decompress text record %d: %v", i, decErr)
+		}
+		htmlBuf.Write(dec)
+	}
+
+	if strings.Contains(htmlBuf.String(), "<img") {
+		t.Fatal("expected no <img> tags in output HTML when --no-images is enabled")
+	}
+}
+
+func TestPipeline_Convert_ProgressLoggingByLevel(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createMinimalTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "progress.azw3")
+
+	infoCollector := newRecordCollector(slog.LevelInfo)
+	pInfo := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+		Logger:     slog.New(infoCollector),
+	})
+	if err := pInfo.Convert(); err != nil {
+		t.Fatalf("Convert() info level failed: %v", err)
+	}
+	if !infoCollector.hasRecord(slog.LevelInfo, "start: parse EPUB") {
+		t.Fatal("expected INFO record with 'start: parse EPUB'")
+	}
+	if !infoCollector.hasAttr("start: parse EPUB", "stage", "parse") {
+		t.Fatal("expected stage=parse attribute on 'start: parse EPUB' record")
+	}
+
+	errCollector := newRecordCollector(slog.LevelError)
+	pErrorOnly := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: filepath.Join(dir, "progress-error-only.azw3"),
+		Logger:     slog.New(errCollector),
+	})
+	if err := pErrorOnly.Convert(); err != nil {
+		t.Fatalf("Convert() error level failed: %v", err)
+	}
+	if errCollector.countByLevel(slog.LevelInfo) > 0 {
+		t.Fatal("did not expect INFO records at error level")
 	}
 }
 

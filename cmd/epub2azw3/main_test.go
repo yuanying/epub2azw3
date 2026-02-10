@@ -167,6 +167,39 @@ func TestBuildLogger_FormatNormalization(t *testing.T) {
 	}
 }
 
+func TestReadCLIOptions_FormatPassthrough(t *testing.T) {
+	cmd := newRootCmd()
+	if err := cmd.ParseFlags([]string{"--format", "mobi"}); err != nil {
+		t.Fatalf("ParseFlags() error = %v", err)
+	}
+
+	opts, err := readCLIOptions(cmd, []string{"./input/book.epub"})
+	if err != nil {
+		t.Fatalf("readCLIOptions() error = %v", err)
+	}
+
+	if opts.OutputFormat != "mobi" {
+		t.Errorf("OutputFormat = %q, want %q", opts.OutputFormat, "mobi")
+	}
+	// Default output path should use .mobi extension
+	if opts.OutputPath != "./input/book.mobi" {
+		t.Errorf("OutputPath = %q, want %q", opts.OutputPath, "./input/book.mobi")
+	}
+}
+
+func TestReadCLIOptions_FormatDefault(t *testing.T) {
+	cmd := newRootCmd()
+
+	opts, err := readCLIOptions(cmd, []string{"./input/book.epub"})
+	if err != nil {
+		t.Fatalf("readCLIOptions() error = %v", err)
+	}
+
+	if opts.OutputFormat != "azw3" {
+		t.Errorf("OutputFormat = %q, want %q", opts.OutputFormat, "azw3")
+	}
+}
+
 func TestDefaultOutputPath(t *testing.T) {
 	got := defaultOutputPath("./books/sample.epub", "azw3")
 	if got != "./books/sample.azw3" {

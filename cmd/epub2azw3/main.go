@@ -176,6 +176,7 @@ func readCLIOptions(cmd *cobra.Command, args []string) (converter.ConvertOptions
 	return converter.ConvertOptions{
 		InputPath:         inputPath,
 		OutputPath:        cliOpts.OutputPath,
+		OutputFormat:      cliOpts.OutputFormat,
 		MaxImageWidth:     cliOpts.MaxImageWidth,
 		JPEGQuality:       cliOpts.JPEGQuality,
 		MaxImageSizeBytes: cliOpts.MaxImageSize * 1024,

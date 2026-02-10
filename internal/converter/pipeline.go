@@ -18,6 +18,7 @@ import (
 type ConvertOptions struct {
 	InputPath         string
 	OutputPath        string
+	OutputFormat      string // "azw3" (default) or "mobi"
 	MaxImageWidth     int
 	JPEGQuality       int
 	MaxImageSizeBytes int
@@ -143,11 +144,19 @@ func (p *Pipeline) Convert() error {
 	}
 	p.stageDone("toc", "load NCX and generate TOC")
 
-	p.stageStart("write", "write AZW3")
-	if err := p.writeAZW3(html, &opf.Metadata, imageMapper, ncxRecord, coverOffset); err != nil {
-		return p.fatal("write", "failed to write AZW3", err)
+	if strings.ToLower(strings.TrimSpace(p.Options.OutputFormat)) == "mobi" {
+		p.stageStart("write", "write MOBI")
+		if err := p.writeMOBI(html, &opf.Metadata, imageMapper, ncxRecord, coverOffset); err != nil {
+			return p.fatal("write", "failed to write MOBI", err)
+		}
+		p.stageDone("write", "write MOBI")
+	} else {
+		p.stageStart("write", "write AZW3")
+		if err := p.writeAZW3(html, &opf.Metadata, imageMapper, ncxRecord, coverOffset); err != nil {
+			return p.fatal("write", "failed to write AZW3", err)
+		}
+		p.stageDone("write", "write AZW3")
 	}
-	p.stageDone("write", "write AZW3")
 
 	if stat, err := os.Stat(p.Options.OutputPath); err == nil {
 		p.logger.Info(fmt.Sprintf("output size: %d bytes", stat.Size()), "stage", "result")
@@ -426,6 +435,44 @@ func (p *Pipeline) writeAZW3(html string, metadata *epub.Metadata, imageMapper *
 
 	if _, err := writer.WriteTo(f); err != nil {
 		return fmt.Errorf("failed to write AZW3: %w", err)
+	}
+
+	return nil
+}
+
+// writeMOBI creates the dual-format MOBI file from the integrated HTML and metadata.
+func (p *Pipeline) writeMOBI(html string, metadata *epub.Metadata, imageMapper *mobi.ImageMapper, ncxRecord []byte, coverOffset *uint32) error {
+	title := metadata.Title
+	if title == "" {
+		title = "Untitled"
+	}
+
+	cfg := mobi.MOBIWriterConfig{
+		Title:       title,
+		HTML:        []byte(html),
+		Metadata:    metadata,
+		NCXRecord:   ncxRecord,
+		Compression: mobi.CompressionPalmDoc,
+		CoverOffset: coverOffset,
+	}
+
+	if imageMapper != nil {
+		cfg.ImageRecords = imageMapper.ImageRecordData()
+	}
+
+	writer, err := mobi.NewMOBIWriter(cfg)
+	if err != nil {
+		return fmt.Errorf("failed to create MOBI writer: %w", err)
+	}
+
+	f, err := os.Create(p.Options.OutputPath)
+	if err != nil {
+		return fmt.Errorf("failed to create output file: %w", err)
+	}
+	defer f.Close()
+
+	if _, err := writer.WriteTo(f); err != nil {
+		return fmt.Errorf("failed to write MOBI: %w", err)
 	}
 
 	return nil

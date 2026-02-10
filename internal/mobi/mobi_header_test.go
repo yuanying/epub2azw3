@@ -718,6 +718,270 @@ func TestRecord0Bytes_Padding(t *testing.T) {
 	}
 }
 
+func TestMOBIHeaderBytes_MOBI7(t *testing.T) {
+	testUID := uint32(0xCAFEBABE)
+	cfg := MOBIHeaderConfig{
+		Compression:          CompressionPalmDoc,
+		TextLength:           30000,
+		TextRecordCount:      8,
+		Language:             "ja",
+		FirstImageIndex:      9,
+		FirstContentRecord:   1,
+		LastContentRecord:    8,
+		FCISRecordNumber:     12,
+		FLISRecordNumber:     11,
+		ExtraRecordDataFlags: 0,
+		UniqueID:             &testUID,
+		MOBIType:             MOBITypeMOBI7,
+		FileVersion:          FileVersionMOBI7,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	data, err := h.MOBIHeaderBytes(0, 0, 0)
+	if err != nil {
+		t.Fatalf("MOBIHeaderBytes() error = %v", err)
+	}
+
+	// Verify total size is 232 bytes (MOBI7)
+	if len(data) != MOBI7HeaderSize {
+		t.Fatalf("MOBIHeaderBytes() length = %d, want %d", len(data), MOBI7HeaderSize)
+	}
+
+	// Verify "MOBI" identifier at offset 0
+	if string(data[0:4]) != "MOBI" {
+		t.Errorf("identifier = %q, want %q", string(data[0:4]), "MOBI")
+	}
+
+	// Verify header length at offset 4 is 232
+	headerLen := binary.BigEndian.Uint32(data[4:8])
+	if headerLen != MOBI7HeaderSize {
+		t.Errorf("header length = %d, want %d", headerLen, MOBI7HeaderSize)
+	}
+
+	// Verify MOBI type at offset 8 is 2 (MOBI7)
+	mobiType := binary.BigEndian.Uint32(data[8:12])
+	if mobiType != MOBITypeMOBI7 {
+		t.Errorf("MOBI type = %d, want %d", mobiType, MOBITypeMOBI7)
+	}
+
+	// Verify file version at offset 20 is 6 (MOBI7)
+	fileVersion := binary.BigEndian.Uint32(data[20:24])
+	if fileVersion != FileVersionMOBI7 {
+		t.Errorf("file version = %d, want %d", fileVersion, FileVersionMOBI7)
+	}
+
+	// Verify encoding is still UTF-8 at offset 12
+	encoding := binary.BigEndian.Uint32(data[12:16])
+	if encoding != EncodingUTF8 {
+		t.Errorf("encoding = %d, want %d", encoding, EncodingUTF8)
+	}
+
+	// Verify UniqueID at offset 16
+	uniqueID := binary.BigEndian.Uint32(data[16:20])
+	if uniqueID != testUID {
+		t.Errorf("uniqueID = 0x%08X, want 0x%08X", uniqueID, testUID)
+	}
+
+	// Verify first image index at offset 80
+	firstImage := binary.BigEndian.Uint32(data[80:84])
+	if firstImage != 9 {
+		t.Errorf("first image index = %d, want 9", firstImage)
+	}
+
+	// Verify first/last content record at offsets 160-163
+	firstContent := binary.BigEndian.Uint16(data[160:162])
+	if firstContent != 1 {
+		t.Errorf("first content record = %d, want 1", firstContent)
+	}
+	lastContent := binary.BigEndian.Uint16(data[162:164])
+	if lastContent != 8 {
+		t.Errorf("last content record = %d, want 8", lastContent)
+	}
+
+	// Verify FCIS at offset 168
+	fcis := binary.BigEndian.Uint32(data[168:172])
+	if fcis != 12 {
+		t.Errorf("FCIS record number = %d, want 12", fcis)
+	}
+
+	// Verify FLIS at offset 176
+	flis := binary.BigEndian.Uint32(data[176:180])
+	if flis != 11 {
+		t.Errorf("FLIS record number = %d, want 11", flis)
+	}
+
+	// Verify INDX record offset at 212
+	indx := binary.BigEndian.Uint32(data[212:216])
+	if indx != 0xFFFFFFFF {
+		t.Errorf("INDX record offset = 0x%08X, want 0xFFFFFFFF", indx)
+	}
+
+	// MOBI7 should NOT have KF8 fields (offsets 216-247)
+	// Length should be exactly 232, not 248
+}
+
+func TestRecord0Bytes_MOBI7(t *testing.T) {
+	testUID := uint32(0xDEADBEEF)
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         5000,
+		TextRecordCount:    2,
+		Language:           "en",
+		FirstImageIndex:    3,
+		FirstContentRecord: 1,
+		LastContentRecord:  2,
+		FCISRecordNumber:   5,
+		FLISRecordNumber:   6,
+		UniqueID:           &testUID,
+		MOBIType:           MOBITypeMOBI7,
+		FileVersion:        FileVersionMOBI7,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	fullName := "Test MOBI7 Book"
+	data, err := h.Record0Bytes(nil, fullName)
+	if err != nil {
+		t.Fatalf("Record0Bytes() error = %v", err)
+	}
+
+	// Record 0 = PalmDOC(16) + MOBI7(232) + Full Name + padding
+	fullNameBytes := []byte(fullName)
+	expectedOffset := uint32(MOBI7HeaderSize) // 232 (no EXTH)
+	expectedLength := uint32(len(fullNameBytes))
+
+	// Check Full Name Offset in MOBI header (offset 68 from MOBI start = 16+68 from record start)
+	gotOffset := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+68 : PalmDOCHeaderSize+72])
+	if gotOffset != expectedOffset {
+		t.Errorf("Full Name Offset = %d, want %d", gotOffset, expectedOffset)
+	}
+
+	// Check Full Name Length in MOBI header
+	gotLength := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+72 : PalmDOCHeaderSize+76])
+	if gotLength != expectedLength {
+		t.Errorf("Full Name Length = %d, want %d", gotLength, expectedLength)
+	}
+
+	// Verify Full Name content at expected position
+	nameStart := PalmDOCHeaderSize + int(expectedOffset)
+	nameEnd := nameStart + int(expectedLength)
+	gotName := string(data[nameStart:nameEnd])
+	if gotName != fullName {
+		t.Errorf("Full Name = %q, want %q", gotName, fullName)
+	}
+
+	// Verify MOBI header is 232 bytes (MOBI7 size)
+	headerLen := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+4 : PalmDOCHeaderSize+8])
+	if headerLen != MOBI7HeaderSize {
+		t.Errorf("MOBI header length = %d, want %d", headerLen, MOBI7HeaderSize)
+	}
+
+	// Verify 4-byte alignment
+	if len(data)%4 != 0 {
+		t.Errorf("Record0 length %d is not 4-byte aligned", len(data))
+	}
+}
+
+func TestRecord0Bytes_MOBI7_WithEXTH(t *testing.T) {
+	testUID := uint32(0xDEADBEEF)
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         5000,
+		TextRecordCount:    2,
+		Language:           "en",
+		FirstImageIndex:    3,
+		FirstContentRecord: 1,
+		LastContentRecord:  2,
+		FCISRecordNumber:   5,
+		FLISRecordNumber:   6,
+		UniqueID:           &testUID,
+		MOBIType:           MOBITypeMOBI7,
+		FileVersion:        FileVersionMOBI7,
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	exthData := buildValidEXTH(100)
+	fullName := "MOBI7 With EXTH"
+	data, err := h.Record0Bytes(exthData, fullName)
+	if err != nil {
+		t.Fatalf("Record0Bytes() error = %v", err)
+	}
+
+	// Full Name Offset should be 232 + 100 = 332
+	expectedOffset := uint32(MOBI7HeaderSize + len(exthData))
+	gotOffset := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+68 : PalmDOCHeaderSize+72])
+	if gotOffset != expectedOffset {
+		t.Errorf("Full Name Offset = %d, want %d", gotOffset, expectedOffset)
+	}
+
+	// Check EXTH flags = 0x40
+	exthFlags := binary.BigEndian.Uint32(data[PalmDOCHeaderSize+100 : PalmDOCHeaderSize+104])
+	if exthFlags != EXTHFlagPresent {
+		t.Errorf("EXTH flags = 0x%08X, want 0x%08X", exthFlags, EXTHFlagPresent)
+	}
+
+	// Verify 4-byte alignment
+	if len(data)%4 != 0 {
+		t.Errorf("Record0 length %d is not 4-byte aligned", len(data))
+	}
+}
+
+func TestMOBIHeaderBytes_ZeroValueDefaultsToKF8(t *testing.T) {
+	// When MOBIType and FileVersion are zero, NewMOBIHeader should default to KF8
+	testUID := uint32(0x12345678)
+	cfg := MOBIHeaderConfig{
+		Compression:        CompressionPalmDoc,
+		TextLength:         1000,
+		TextRecordCount:    1,
+		Language:           "en",
+		FirstImageIndex:    2,
+		FirstContentRecord: 1,
+		LastContentRecord:  1,
+		FCISRecordNumber:   3,
+		FLISRecordNumber:   4,
+		UniqueID:           &testUID,
+		// MOBIType and FileVersion intentionally left at zero
+	}
+
+	h, err := NewMOBIHeader(cfg)
+	if err != nil {
+		t.Fatalf("NewMOBIHeader() error = %v", err)
+	}
+
+	data, err := h.MOBIHeaderBytes(0, 0, 0)
+	if err != nil {
+		t.Fatalf("MOBIHeaderBytes() error = %v", err)
+	}
+
+	// Should default to KF8: 248 bytes
+	if len(data) != MOBIHeaderSize {
+		t.Fatalf("MOBIHeaderBytes() length = %d, want %d", len(data), MOBIHeaderSize)
+	}
+
+	// MOBI type should be KF8 (248)
+	mobiType := binary.BigEndian.Uint32(data[8:12])
+	if mobiType != MOBITypeKF8 {
+		t.Errorf("MOBI type = %d, want %d", mobiType, MOBITypeKF8)
+	}
+
+	// File version should be KF8 (8)
+	fileVersion := binary.BigEndian.Uint32(data[20:24])
+	if fileVersion != FileVersionKF8 {
+		t.Errorf("file version = %d, want %d", fileVersion, FileVersionKF8)
+	}
+}
+
 func TestRecord0Bytes_MultibyteName(t *testing.T) {
 	cfg := MOBIHeaderConfig{
 		Compression:        CompressionPalmDoc,

@@ -99,11 +99,13 @@ func (w *AZW3Writer) WriteTo(out io.Writer) (int64, error) {
 	totalRecordCount := uint32(nextIndex)
 
 	// --- Build EXTH ---
+	// For KF8-only output, EXTH 121 should point to the first KF8 text record.
+	boundaryOffset := uint32(firstContentRecord)
 	var exth *EXTHHeader
 	if cfg.Metadata != nil {
-		exth = EXTHFromMetadata(*cfg.Metadata, 0, totalRecordCount)
+		exth = EXTHFromMetadata(*cfg.Metadata, boundaryOffset, totalRecordCount)
 	} else {
-		exth = NewEXTHHeader(0, totalRecordCount)
+		exth = NewEXTHHeader(boundaryOffset, totalRecordCount)
 	}
 	if cfg.CoverOffset != nil {
 		exth.AddUint32Record(131, *cfg.CoverOffset)

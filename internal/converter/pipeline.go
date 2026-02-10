@@ -15,8 +15,11 @@ import (
 
 // ConvertOptions holds options for the conversion pipeline.
 type ConvertOptions struct {
-	InputPath  string
-	OutputPath string
+	InputPath         string
+	OutputPath        string
+	MaxImageWidth     int
+	JPEGQuality       int
+	MaxImageSizeBytes int
 }
 
 // Pipeline orchestrates the EPUB to AZW3 conversion.
@@ -37,20 +40,24 @@ func (p *Pipeline) Convert() error {
 	}
 	defer reader.Close()
 
-	html, imageMapper, builder, err := p.buildHTML(reader, opf)
+	cover := DetectCoverInfo(opf, reader)
+	if cover == nil {
+		log.Printf("warning: cover image not found")
+	}
+
+	html, imageMapper, builder, err := p.buildHTML(reader, opf, cover)
 	if err != nil {
 		return err
 	}
 
-	cover := DetectCoverInfo(opf, reader)
 	var coverOffset *uint32
-	if cover == nil {
-		log.Printf("warning: cover image not found")
-	} else if offset, ok := ComputeCoverOffset(cover, imageMapper); ok {
-		coverOffset = &offset
-	} else {
-		log.Printf("warning: cover image detected (%s) but not found in image records: %s",
-			cover.DetectionMethod, cover.Href)
+	if cover != nil {
+		if offset, ok := ComputeCoverOffset(cover, imageMapper); ok {
+			coverOffset = &offset
+		} else {
+			log.Printf("warning: cover image detected (%s) but not found in image records: %s",
+				cover.DetectionMethod, cover.Href)
+		}
 	}
 
 	// Load NCX for TOC generation
@@ -114,7 +121,7 @@ func (p *Pipeline) parseEPUB() (*epub.EPUBReader, *epub.OPF, error) {
 
 // buildHTML loads spine items and builds the integrated HTML.
 // It also collects images referenced in the content.
-func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *mobi.ImageMapper, *HTMLBuilder, error) {
+func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF, cover *CoverInfo) (string, *mobi.ImageMapper, *HTMLBuilder, error) {
 	builder := NewHTMLBuilder()
 	cssCache := make(map[string]string)
 	validChapters := 0
@@ -196,9 +203,14 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *m
 
 	// Collect images from manifest in document order
 	imageMapper := mobi.NewImageMapper()
+	optimizer := NewImageOptimizer(p.Options)
 	for _, id := range opf.ManifestOrder {
 		item, ok := opf.Manifest[id]
 		if !ok {
+			continue
+		}
+		if isSVG(item.MediaType) {
+			log.Printf("warning: SVG image %q is not supported and will be skipped", item.Href)
 			continue
 		}
 		if !isImage(item.MediaType) {
@@ -209,7 +221,28 @@ func (p *Pipeline) buildHTML(reader *epub.EPUBReader, opf *epub.OPF) (string, *m
 			log.Printf("warning: failed to read image %q: %v, skipping", item.Href, err)
 			continue
 		}
-		imageMapper.AddImage(item.Href, imgData, item.MediaType)
+
+		isCover := cover != nil && cover.Href == item.Href
+		optimized, optErr := optimizer.Optimize(item.Href, item.MediaType, imgData, isCover)
+		if optErr != nil {
+			log.Printf("warning: image optimization failed for %q: %v, using original", item.Href, optErr)
+		}
+		if optimized.Warning != "" {
+			log.Printf("warning: image optimization for %q: %s", item.Href, optimized.Warning)
+		}
+
+		mediaType := item.MediaType
+		if optimized.Format != "" {
+			switch strings.ToLower(optimized.Format) {
+			case "jpeg", "jpg":
+				mediaType = "image/jpeg"
+			case "png":
+				mediaType = "image/png"
+			case "gif":
+				mediaType = "image/gif"
+			}
+		}
+		imageMapper.AddImage(item.Href, optimized.Data, mediaType)
 	}
 
 	html, err := builder.Build()
@@ -299,11 +332,23 @@ func isXHTML(mediaType string) bool {
 	return strings.Contains(mediaType, "html") || strings.Contains(mediaType, "xhtml")
 }
 
+// normalizeMediaType extracts the base MIME type, lowercased, without parameters.
+func normalizeMediaType(mt string) string {
+	mt = strings.ToLower(strings.TrimSpace(mt))
+	base, _, _ := strings.Cut(mt, ";")
+	return strings.TrimSpace(base)
+}
+
+// isSVG checks if a media type indicates an SVG image.
+func isSVG(mediaType string) bool {
+	return normalizeMediaType(mediaType) == "image/svg+xml"
+}
+
 // isImage checks if a media type indicates a raster image file.
 // SVG (image/svg+xml) is excluded as Kindle does not support it.
 func isImage(mediaType string) bool {
-	if mediaType == "image/svg+xml" {
+	if isSVG(mediaType) {
 		return false
 	}
-	return strings.HasPrefix(mediaType, "image/")
+	return strings.HasPrefix(normalizeMediaType(mediaType), "image/")
 }

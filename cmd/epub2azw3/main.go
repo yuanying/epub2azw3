@@ -6,11 +6,27 @@ import (
 	"log/slog"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"strings"
 
 	"github.com/spf13/cobra"
 	"github.com/yuanying/epub2azw3/internal/converter"
 )
+
+var (
+	version = "dev"
+	commit  = "none"
+	date    = "unknown"
+)
+
+func init() {
+	if version != "dev" {
+		return
+	}
+	if info, ok := debug.ReadBuildInfo(); ok && info.Main.Version != "(devel)" {
+		version = info.Main.Version
+	}
+}
 
 const (
 	defaultJPEGQuality   = 85
@@ -153,8 +169,9 @@ func readCLIOptions(cmd *cobra.Command, args []string) (converter.ConvertOptions
 
 func newRootCmd() *cobra.Command {
 	cmd := &cobra.Command{
-		Use:   "epub2azw3",
-		Short: "Convert EPUB files to AZW3 (Kindle) format",
+		Use:     "epub2azw3",
+		Version: version,
+		Short:   "Convert EPUB files to AZW3 (Kindle) format",
 		Long: `epub2azw3 is a command-line tool that converts EPUB ebooks to
 Amazon Kindle compatible AZW3 (KF8) format.
 
@@ -175,6 +192,7 @@ like Calibre.`,
 		},
 	}
 
+	cmd.SetVersionTemplate(fmt.Sprintf("epub2azw3 %s (commit: %s, built: %s)\n", version, commit, date))
 	cmd.SetErr(os.Stderr)
 	cmd.Flags().StringP("output", "o", "", "Output file path (default: input with .azw3 extension)")
 	cmd.Flags().IntP("quality", "q", defaultJPEGQuality, "JPEG quality (60-100)")

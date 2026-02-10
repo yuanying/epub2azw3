@@ -2,7 +2,12 @@ package converter
 
 import (
 	"archive/zip"
+	"bytes"
 	"encoding/binary"
+	"image"
+	"image/color"
+	"image/jpeg"
+	"image/png"
 	"os"
 	"path/filepath"
 	"testing"
@@ -582,6 +587,73 @@ func createImageTestEPUB(t *testing.T, dir string) string {
 	return epubPath
 }
 
+func createOptimizedImageTestEPUB(t *testing.T, dir string) string {
+	t.Helper()
+	epubPath := filepath.Join(dir, "opt-images.epub")
+	f, err := os.Create(epubPath)
+	if err != nil {
+		t.Fatalf("failed to create test EPUB: %v", err)
+	}
+
+	w := zip.NewWriter(f)
+	header := &zip.FileHeader{
+		Name:   "mimetype",
+		Method: zip.Store,
+	}
+	mw, _ := w.CreateHeader(header)
+	mw.Write([]byte("application/epub+zip"))
+
+	cw, _ := w.Create("META-INF/container.xml")
+	cw.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<container version="1.0" xmlns="urn:oasis:names:tc:opendocument:xmlns:container">
+  <rootfiles>
+    <rootfile full-path="OEBPS/content.opf" media-type="application/oebps-package+xml"/>
+  </rootfiles>
+</container>`))
+
+	ow, _ := w.Create("OEBPS/content.opf")
+	ow.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<package xmlns="http://www.idpf.org/2007/opf" version="3.0" unique-identifier="uid">
+  <metadata xmlns:dc="http://purl.org/dc/elements/1.1/">
+    <dc:title>Image Optimization Book</dc:title>
+    <dc:language>en</dc:language>
+    <dc:identifier id="uid">urn:uuid:img-opt-test</dc:identifier>
+  </metadata>
+  <manifest>
+    <item id="ch1" href="text/chapter1.xhtml" media-type="application/xhtml+xml"/>
+    <item id="cover" href="images/cover.jpg" media-type="image/jpeg" properties="cover-image"/>
+    <item id="photo" href="images/photo.png" media-type="image/png"/>
+  </manifest>
+  <spine>
+    <itemref idref="ch1"/>
+  </spine>
+</package>`))
+
+	xw, _ := w.Create("OEBPS/text/chapter1.xhtml")
+	xw.Write([]byte(`<?xml version="1.0" encoding="UTF-8"?>
+<html xmlns="http://www.w3.org/1999/xhtml">
+<head><title>Chapter 1</title></head>
+<body>
+<h1>Images</h1>
+<img src="../images/cover.jpg" alt="Cover"/>
+<img src="../images/photo.png" alt="Photo"/>
+</body>
+</html>`))
+
+	coverData := createJPEGImage(t, 1200, 800)
+	cwImg, _ := w.Create("OEBPS/images/cover.jpg")
+	cwImg.Write(coverData)
+
+	photoData := createPNGImage(t, 1000, 500)
+	pw, _ := w.Create("OEBPS/images/photo.png")
+	pw.Write(photoData)
+
+	w.Close()
+	f.Close()
+
+	return epubPath
+}
+
 func TestPipeline_Convert_ImageRecords(t *testing.T) {
 	dir := t.TempDir()
 	epubPath := createImageTestEPUB(t, dir)
@@ -699,6 +771,104 @@ func TestPipeline_Convert_SVGFiltered(t *testing.T) {
 			}
 		}
 	}
+}
+
+func TestPipeline_Convert_ImageOptimizationApplied(t *testing.T) {
+	dir := t.TempDir()
+	epubPath := createOptimizedImageTestEPUB(t, dir)
+	outputPath := filepath.Join(dir, "output.azw3")
+
+	p := NewPipeline(ConvertOptions{
+		InputPath:  epubPath,
+		OutputPath: outputPath,
+	})
+
+	if err := p.Convert(); err != nil {
+		t.Fatalf("Convert() failed: %v", err)
+	}
+
+	data, err := os.ReadFile(outputPath)
+	if err != nil {
+		t.Fatalf("failed to read output: %v", err)
+	}
+
+	rec0 := extractRecord(data, 0)
+	firstImageIndex := readUint32BE(rec0, 96)
+	if firstImageIndex == 0xFFFFFFFF {
+		t.Fatal("firstImageIndex is 0xFFFFFFFF, expected images to be present")
+	}
+
+	coverRec := extractRecord(data, int(firstImageIndex))
+	coverCfg, coverFmt, err := image.DecodeConfig(bytes.NewReader(coverRec))
+	if err != nil {
+		t.Fatalf("failed to decode cover image record: %v", err)
+	}
+	if coverFmt != "jpeg" {
+		t.Fatalf("cover format = %q, want jpeg", coverFmt)
+	}
+	if coverCfg.Width != 1200 {
+		t.Fatalf("cover width = %d, want 1200 (cover should not be resized)", coverCfg.Width)
+	}
+
+	photoRec := extractRecord(data, int(firstImageIndex)+1)
+	photoCfg, photoFmt, err := image.DecodeConfig(bytes.NewReader(photoRec))
+	if err != nil {
+		t.Fatalf("failed to decode photo image record: %v", err)
+	}
+	if photoFmt != "jpeg" {
+		t.Fatalf("photo format = %q, want jpeg (png without alpha should convert)", photoFmt)
+	}
+	if photoCfg.Width != 600 || photoCfg.Height != 300 {
+		t.Fatalf("photo size = %dx%d, want 600x300", photoCfg.Width, photoCfg.Height)
+	}
+
+	coverOffset, ok := findEXTHUint32(rec0, 131)
+	if !ok {
+		t.Fatal("EXTH type 131 not found")
+	}
+	if coverOffset != 0 {
+		t.Fatalf("cover offset = %d, want 0", coverOffset)
+	}
+}
+
+func createJPEGImage(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.Set(x, y, color.RGBA{
+				R: uint8((x*13 + y*3) % 256),
+				G: uint8((x*7 + y*11) % 256),
+				B: uint8((x*5 + y*17) % 256),
+				A: 255,
+			})
+		}
+	}
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, img, &jpeg.Options{Quality: 90}); err != nil {
+		t.Fatalf("jpeg.Encode() failed: %v", err)
+	}
+	return buf.Bytes()
+}
+
+func createPNGImage(t *testing.T, w, h int) []byte {
+	t.Helper()
+	img := image.NewNRGBA(image.Rect(0, 0, w, h))
+	for y := 0; y < h; y++ {
+		for x := 0; x < w; x++ {
+			img.SetNRGBA(x, y, color.NRGBA{
+				R: uint8((x*19 + y*2) % 256),
+				G: uint8((x*5 + y*23) % 256),
+				B: uint8((x*11 + y*29) % 256),
+				A: 255,
+			})
+		}
+	}
+	var buf bytes.Buffer
+	if err := png.Encode(&buf, img); err != nil {
+		t.Fatalf("png.Encode() failed: %v", err)
+	}
+	return buf.Bytes()
 }
 
 func TestPipeline_Convert_WithTestdataEPUB(t *testing.T) {
